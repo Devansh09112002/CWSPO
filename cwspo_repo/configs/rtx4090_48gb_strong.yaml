@@ -29,23 +29,12 @@ policy:
   attn_implementation: flash_attention_2
 
 verifier:
-  mode: judge_token
+  mode: process_reward_model
   model_name: Qwen/Qwen2.5-Math-7B-PRM800K
   trust_remote_code: true
-  positive_token: +
-  negative_token: -
-  prompt_template: |
-    You are a process verifier for mathematical reasoning.
-    Given the question and the partial solution below, decide whether the partial solution is still on a correct path.
-    Respond with exactly one token: + or -.
-
-    Question:
-    {prompt}
-
-    Partial solution:
-    {prefix}
-
-    Verdict:
+  prm_system_prompt: Please reason step by step, and put your final answer within \boxed{}.
+  prm_step_token: <extra_0>
+  prm_positive_label_index: 1
   load_in_4bit: true
   attn_implementation: flash_attention_2
 

@@ -1,0 +1,330 @@
+# Experiment Log
+
+## 2026-03-17
+
+- Status: completed real minimal end-to-end run on the bundled sample set.
+- Config: `configs/rtx4090_48gb_minimal.yaml`
+- Dataset: `examples/sample_math.jsonl` with `3` prompts and `examples/sample_processbench_like.jsonl` for process evaluation.
+- Commands:
+  - `python scripts/run_generate.py --config configs/rtx4090_48gb_minimal.yaml`
+  - `python scripts/run_score.py --config configs/rtx4090_48gb_minimal.yaml`
+  - `python scripts/run_pairs.py --config configs/rtx4090_48gb_minimal.yaml`
+  - `python scripts/run_train.py --config configs/rtx4090_48gb_minimal.yaml`
+  - `python scripts/run_eval_final.py --config configs/rtx4090_48gb_minimal.yaml`
+  - `python scripts/run_eval_process.py --config configs/rtx4090_48gb_minimal.yaml --ground-truth examples/sample_processbench_like.jsonl`
+  - `python scripts/run_pipeline.py --config configs/rtx4090_48gb_minimal.yaml --with-train --with-final-eval --with-process-eval --ground-truth examples/sample_processbench_like.jsonl`
+- Outputs:
+  - `18` traces written to `outputs/rtx4090_minimal/traces.jsonl`
+  - `18` scored traces written to `outputs/rtx4090_minimal/scored.jsonl`
+  - `26` weighted pairs written to `outputs/rtx4090_minimal/pairs.jsonl`
+  - training summary written to `outputs/rtx4090_minimal/train_metrics.json`
+  - final adapter saved under `outputs/rtx4090_minimal/checkpoints/final/`
+  - final eval written to `outputs/rtx4090_minimal/final_eval.json`
+  - process eval written to `outputs/rtx4090_minimal/process_eval.json`
+- Metrics:
+  - `train_metrics.json`: `num_pairs=26`, `num_steps=2`, `mean_loss=0.44579504086421085`
+  - `final_eval.json`: `accuracy=1.0` on `3` examples
+  - `process_eval.json`: `earliest_error_exact=0.3333333333333333`, `coverage=1.0`
+- Notes:
+  - Real model execution completed; no mock mode was needed.
+  - The environment emitted an informational fallback warning because `flash_attention_2` was not installed, and the loader automatically used the model default attention path instead.
+
+## 2026-03-17 - Real-small implementation phase
+
+- Status: implementation completed for the real-small experiment path; Run A (`step_dpo` with the small verifier) is in progress.
+- Objective:
+  - move beyond the 3-example smoke test,
+  - build a real-small GSM8K-based experimental pipeline,
+  - add baseline selection, resume support, confidence diagnostics, pair audits, and stronger process-eval reporting.
+- What changed:
+  - added reproducible real-small data preparation for GSM8K train/eval subsets plus a synthetic process-eval set with explicit earliest-error labels,
+  - extended config/schema support for data limits, method selection, resume behavior, diagnostics outputs, and run summaries,
+  - implemented baseline-aware pair construction for `answer_dpo`, `step_dpo`, `confidence_filter_only`, and `confidence_weighted_step_dpo`,
+  - added machine-readable confidence analysis, markdown confidence reports, and low/mid/high confidence pair-audit reports,
+  - replaced the minimal process evaluation path with a richer evaluator that checks coverage, exact and near-miss boundary accuracy, boundary confusion, and failure examples,
+  - expanded training and final-eval reporting so runs record method name, adapter path, adapter load status, wall-clock time, and optimizer-step logs.
+- Why:
+  - the smoke test proved engineering wiring, but it did not test whether confidence is meaningful or whether the main method beats the baselines on a non-trivial math subset.
+- Files touched:
+  - `configs/rtx4090_48gb_real_small.yaml`
+  - `configs/rtx4090_48gb_real_small_step_dpo.yaml`
+  - `configs/rtx4090_48gb_real_small_conf_filter.yaml`
+  - `configs/rtx4090_48gb_real_small_answer_dpo.yaml`
+  - `configs/rtx4090_48gb_real_small_strong_verifier.yaml`
+  - `scripts/prepare_real_small_data.py`
+  - `scripts/run_generate.py`
+  - `scripts/run_pairs.py`
+  - `scripts/run_eval_final.py`
+  - `scripts/run_eval_process.py`
+  - `scripts/run_pipeline.py`
+  - `src/cwspo/config.py`
+  - `src/cwspo/schemas.py`
+  - `src/cwspo/data/prompts.py`
+  - `src/cwspo/data/real_small.py`
+  - `src/cwspo/pipeline/build_pairs.py`
+  - `src/cwspo/pipeline/diagnostics.py`
+  - `src/cwspo/evaluation/process_eval.py`
+  - `src/cwspo/evaluation/final_eval.py`
+  - `src/cwspo/training/train_step_dpo.py`
+  - `src/cwspo/utils/io.py`
+  - `tests/test_pairs.py`
+  - `tests/test_process_eval.py`
+  - `tasks/RUN_LOG.md`
+  - `tasks/RESULTS_SUMMARY.md`
+- Reproducibility impact:
+  - yes, positively: the new real-small data prep is seed-controlled and writes deterministic prompt subsets and process-eval files;
+  - run-to-run model outputs still depend on stochastic decoding because generation remains sampled by design.
+- Commands:
+  - `source .venv/bin/activate && python scripts/prepare_real_small_data.py --config configs/rtx4090_48gb_real_small_step_dpo.yaml`
+  - `source .venv/bin/activate && pytest -q`
+  - `source .venv/bin/activate && python -m compileall src scripts tests`
+  - `source .venv/bin/activate && export HF_HOME=/workspace/CWSPO/cwspo_repo/.hf_home && python scripts/run_pipeline.py --config configs/rtx4090_48gb_real_small_step_dpo.yaml --with-train --with-final-eval --with-process-eval`
+- Preliminary artifacts from Run A:
+  - `100` training prompts prepared in `data/real_small/gsm8k_train_100_seed42.jsonl`
+  - `24` eval prompts prepared in `data/real_small/gsm8k_eval_24_seed43.jsonl`
+  - `48` process-eval examples prepared in `data/real_small/process_eval_48_seed44.jsonl`
+  - `400` shared traces generated in `outputs/real_small/shared/train_traces.jsonl`
+  - `400` shared scored traces written to `outputs/real_small/shared/scored_small_verifier.jsonl`
+  - `536` Step-DPO pairs written to `outputs/real_small/step_dpo_smallverifier/pairs.jsonl`
+  - preliminary confidence diagnostics: `mean_confidence=0.6928`, `decisive_pair_accuracy=0.7279`, `high_confidence_pair_accuracy=0.9145`
+- Research interpretation so far:
+  - engineering-relevant: yes, the repo now supports a real-small baseline pipeline with resumable artifacts and auditable confidence outputs;
+  - research-relevant: partially, because the first larger dataset path already produces hundreds of pairs, but we still need completed training/eval runs before making method claims.
+
+- Status update:
+  - Run A (`configs/rtx4090_48gb_real_small_step_dpo.yaml`) completed end-to-end on the real-small setup.
+  - A post-run refresh reran only process evaluation so the final artifacts include process-confidence bucket summaries and the richer `run_summary.json` schema.
+- Commands:
+  - `source .venv/bin/activate && export HF_HOME=/workspace/CWSPO/cwspo_repo/.hf_home && python scripts/run_pipeline.py --config configs/rtx4090_48gb_real_small_step_dpo.yaml --with-train --with-final-eval --with-process-eval --resume-from final_eval`
+- Run A outputs:
+  - `outputs/real_small/step_dpo_smallverifier/run_summary.json`
+  - `outputs/real_small/step_dpo_smallverifier/training_report.json`
+  - `outputs/real_small/step_dpo_smallverifier/confidence_analysis.json`
+  - `outputs/real_small/step_dpo_smallverifier/process_eval.json`
+  - `outputs/real_small/step_dpo_smallverifier/process_failures.md`
+- Run A metrics:
+  - dataset: `100` GSM8K train prompts, `24` GSM8K eval prompts, `48` fixed process-eval examples
+  - traces: `400`
+  - pairs: `536`
+  - train steps: `68`
+  - final accuracy: `0.4583333333333333`
+  - process earliest-error exact: `0.8958333333333334`
+  - process coverage: `0.8958333333333334`
+  - mean confidence: `0.6927824989468634`
+  - high-confidence pair accuracy: `0.9145299145299145`
+- Interpretation:
+  - engineering-relevant: yes, fully validated on a materially larger setup than the smoke test;
+  - research-relevant: yes, because this is now a non-trivial held-out run and process-eval result, but it is only the first baseline and does not yet establish whether confidence weighting beats the alternatives.
+
+- Status update:
+  - confidence diagnostics were expanded to report ambiguous-pair contamination, including preferred-branch final-correct rate, decisive-pair fraction, and both-branches-wrong fraction;
+  - `README.md` and `docs/CODEX.md` were rewritten around the real-small workflow rather than the smoke-test-only path;
+  - Run B (`configs/rtx4090_48gb_real_small_conf_filter.yaml`) is in progress.
+- Why:
+  - the earlier reports could overstate confidence quality because they emphasized decisive pairs while hiding how many high-confidence pairs still had both branches wrong.
+- Files touched:
+  - `src/cwspo/pipeline/diagnostics.py`
+  - `scripts/run_pipeline.py`
+  - `tests/test_pairs.py`
+  - `README.md`
+  - `docs/CODEX.md`
+- Reproducibility impact:
+  - yes, positive: the underlying pairs did not change, but the diagnostic and summary artifacts now expose more pair-quality structure and are easier to compare across runs.
+- Commands:
+  - `source .venv/bin/activate && pytest -q`
+  - `source .venv/bin/activate && python -m compileall src scripts tests`
+  - `source .venv/bin/activate && python scripts/run_pairs.py --config configs/rtx4090_48gb_real_small_step_dpo.yaml`
+  - `source .venv/bin/activate && python scripts/run_pairs.py --config configs/rtx4090_48gb_real_small.yaml`
+  - `source .venv/bin/activate && python scripts/run_pairs.py --config configs/rtx4090_48gb_real_small_answer_dpo.yaml`
+  - `source .venv/bin/activate && python - <<'PY' ... import bitsandbytes ... PY`
+  - `source .venv/bin/activate && python - <<'PY' ... model_info(\"Qwen/Qwen2.5-Math-7B-PRM800K\") ... PY`
+- Research interpretation:
+  - Step-DPO high-confidence pairs are cleaner on decisive comparisons, but they are not purely clean: the current refreshed diagnostics show that about `41%` of the high-confidence small-verifier local pairs still have both branches wrong.
+
+- Status update:
+  - Run B (`configs/rtx4090_48gb_real_small_conf_filter.yaml`) completed end-to-end and was refreshed so the pair diagnostics, process-eval report, and `run_summary.json` all use the richer confidence schema.
+- Commands:
+  - `source .venv/bin/activate && python scripts/run_pairs.py --config configs/rtx4090_48gb_real_small_conf_filter.yaml`
+  - `source .venv/bin/activate && export HF_HOME=/workspace/CWSPO/cwspo_repo/.hf_home && python scripts/run_pipeline.py --config configs/rtx4090_48gb_real_small_conf_filter.yaml --with-train --with-final-eval --with-process-eval --resume-from final_eval`
+- Run B metrics:
+  - pairs kept: `458`
+  - pairs dropped by threshold: `78`
+  - train steps: `58`
+  - final accuracy: `0.4166666666666667`
+  - process earliest-error exact: `0.8958333333333334`
+  - process coverage: `0.8958333333333334`
+  - mean confidence: `0.7149873444328196`
+  - high-confidence pair accuracy: `0.9145299145299145`
+- Interpretation:
+  - engineering-relevant: yes, the hard-filter baseline is now fully implemented and reproducible;
+  - research-relevant: yes, and the current evidence is negative for this variant relative to plain Step-DPO on held-out answer accuracy, even though the pair set is cleaner and smaller.
+
+- Status update:
+  - process evaluation artifacts now explicitly record that the current rich process metric is an offline fixed-trace boundary diagnostic and does not depend on the trained policy adapter.
+- Why:
+  - the small-verifier process score is useful, but without this clarification it is easy to over-read unchanged process metrics across training baselines as evidence about learned policy behavior.
+- Files touched:
+  - `src/cwspo/evaluation/process_eval.py`
+  - `scripts/run_pipeline.py`
+- Reproducibility impact:
+  - yes, positive: the metric itself is unchanged, but the artifact schema now states the evaluation scope directly.
+
+- Status update:
+  - Run C (`configs/rtx4090_48gb_real_small.yaml`) completed end-to-end with the small verifier.
+- Commands:
+  - `source .venv/bin/activate && export HF_HOME=/workspace/CWSPO/cwspo_repo/.hf_home && python scripts/run_pipeline.py --config configs/rtx4090_48gb_real_small.yaml --with-train --with-final-eval --with-process-eval --resume-from pairs`
+  - `source .venv/bin/activate && export HF_HOME=/workspace/CWSPO/cwspo_repo/.hf_home && python scripts/run_pipeline.py --config configs/rtx4090_48gb_real_small.yaml --with-train --with-final-eval --with-process-eval --resume-from final_eval`
+- Run C metrics:
+  - pairs: `536`
+  - train steps: `68`
+  - final accuracy: `0.4166666666666667`
+  - process earliest-error exact: `0.8958333333333334`
+  - mean confidence: `0.6927824989468634`
+  - high-confidence pair accuracy: `0.9145299145299145`
+- Interpretation:
+  - engineering-relevant: yes, the main CW-SPO path is fully implemented on the real-small setup;
+  - research-relevant: yes, and current evidence is negative relative to plain Step-DPO on held-out answer accuracy.
+
+- Status update:
+  - the strong-verifier path initially failed because the repo only supported judge-token verifiers and the PRM config itself was malformed for YAML;
+  - the repo was patched to support `Qwen/Qwen2.5-Math-7B-PRM800K` via a real `process_reward_model` backend and to stay compatible with the current local `transformers` version.
+- Why:
+  - the stronger verifier comparison needed to be real and modular, not a config placeholder.
+- Files touched:
+  - `src/cwspo/config.py`
+  - `src/cwspo/models/hf.py`
+  - `src/cwspo/models/verifier.py`
+  - `configs/rtx4090_48gb_real_small_strong_verifier.yaml`
+  - `configs/rtx4090_48gb_strong.yaml`
+  - `configs/strong.yaml`
+  - `tests/test_verifier.py`
+  - `README.md`
+  - `docs/CODEX.md`
+- Reproducibility impact:
+  - yes, positive: the strong-verifier config is now valid YAML, the PRM backend is a real supported path, and adapter loading still works after the loader changes.
+- Commands:
+  - `source .venv/bin/activate && pytest -q`
+  - `source .venv/bin/activate && export HF_HOME=/workspace/CWSPO/cwspo_repo/.hf_home && python - <<'PY' ... build_verifier(load_config('configs/rtx4090_48gb_real_small_strong_verifier.yaml').verifier, ...) ... PY`
+- Notes:
+  - the PRM backend uses the `<extra_0>` process-reward interface documented by the model card rather than judge-token generation;
+  - two remote-code compatibility shims were needed locally: missing `pad_token_id` normalization and `DynamicCache` legacy-method compatibility.
+
+- Status update:
+  - Run D (`configs/rtx4090_48gb_real_small_strong_verifier.yaml`) completed end-to-end after resuming from the saved checkpoint following the adapter-loader fix.
+- Commands:
+  - `source .venv/bin/activate && export HF_HOME=/workspace/CWSPO/cwspo_repo/.hf_home && python scripts/run_pipeline.py --config configs/rtx4090_48gb_real_small_strong_verifier.yaml --with-train --with-final-eval --with-process-eval`
+  - `source .venv/bin/activate && export HF_HOME=/workspace/CWSPO/cwspo_repo/.hf_home && python scripts/run_pipeline.py --config configs/rtx4090_48gb_real_small_strong_verifier.yaml --with-train --with-final-eval --with-process-eval --resume-from checkpoint`
+- Run D metrics:
+  - pairs: `488`
+  - train steps: `62`
+  - final accuracy: `0.3333333333333333`
+  - process earliest-error exact: `1.0`
+  - process coverage: `1.0`
+  - mean confidence: `0.6862288952353033`
+  - high-confidence pair accuracy: `0.9705882352941176`
+  - both-branches-wrong fraction: `0.38934426229508196`
+- Interpretation:
+  - engineering-relevant: yes, the strong offline verifier is now a real runnable backend on the 4090 path;
+  - research-relevant: yes, and the result is mixed: pair-quality proxies improved, but downstream answer accuracy worsened.
+
+- Status update:
+  - the answer-level DPO baseline (`configs/rtx4090_48gb_real_small_answer_dpo.yaml`) completed end-to-end.
+- Commands:
+  - `source .venv/bin/activate && export HF_HOME=/workspace/CWSPO/cwspo_repo/.hf_home && python scripts/run_pipeline.py --config configs/rtx4090_48gb_real_small_answer_dpo.yaml --with-train --with-final-eval --with-process-eval --resume-from pairs`
+- Run metrics:
+  - pairs: `160`
+  - train steps: `20`
+  - final accuracy: `0.5`
+  - process earliest-error exact: `n/a`
+  - process coverage: `n/a`
+- Interpretation:
+  - engineering-relevant: yes, the baseline matrix is now complete;
+  - research-relevant: yes, and the current answer-level DPO baseline is the strongest final-answer performer in this real-small matrix.
+
+- Status update:
+  - the earlier small-verifier runs were refreshed so all `run_summary.json` files now include the same richer process-eval schema.
+- Commands:
+  - `source .venv/bin/activate && export HF_HOME=/workspace/CWSPO/cwspo_repo/.hf_home && python - <<'PY' ... subprocess.run(['python', 'scripts/run_pipeline.py', '--config', cfg, '--with-train', '--with-final-eval', '--with-process-eval', '--resume-from', 'final_eval']) ... PY`
+- Research interpretation:
+  - the completed matrix is now directly comparable across baselines without schema mismatches in the saved artifacts.
+
+## 2026-03-17 - Pair purification and orientation refinement phase
+
+- Status: completed the focused refinement matrix plus the strict hard-filter tiebreak; `semi_purified` was implemented and pair-built but its full train/eval run was intentionally deferred after the core diagnosis was already resolved.
+- Objective:
+  - test whether pair contamination and orientation were the real bottleneck,
+  - implement auditable pair modes rather than speculate,
+  - rerun the local-pair matrix on the same real-small slice,
+  - and decide whether the project should continue with purified local pairs.
+- What changed:
+  - added explicit pair modes: `current_utility`, `correctness_priority`, `strict_purified`, and `semi_purified`,
+  - made pair construction log orientation reasons, correctness patterns, divergence quality, and drop reasons,
+  - added pair taxonomy and purity reports,
+  - added pair orientation audit markdown outputs,
+  - hardened divergence filtering to reject weak or near-identical local branches conservatively,
+  - wired the new diagnostics into both training-pair and process-eval reporting,
+  - documented the refinement phase and updated the README/CODEX guidance around pair quality.
+- Files touched:
+  - `configs/rtx4090_48gb_refine_step_current.yaml`
+  - `configs/rtx4090_48gb_refine_step_correctness.yaml`
+  - `configs/rtx4090_48gb_refine_step_strict.yaml`
+  - `configs/rtx4090_48gb_refine_cw_current.yaml`
+  - `configs/rtx4090_48gb_refine_cw_correctness.yaml`
+  - `configs/rtx4090_48gb_refine_cw_strict.yaml`
+  - `configs/rtx4090_48gb_refine_conf_filter_strict.yaml`
+  - `configs/rtx4090_48gb_refine_cw_semi.yaml`
+  - `configs/rtx4090_48gb_refine_cw_strict_strongverifier.yaml`
+  - `src/cwspo/config.py`
+  - `src/cwspo/pipeline/build_pairs.py`
+  - `src/cwspo/pipeline/diagnostics.py`
+  - `src/cwspo/evaluation/process_eval.py`
+  - `scripts/run_pairs.py`
+  - `scripts/run_pipeline.py`
+  - `tests/test_pairs.py`
+  - `README.md`
+  - `docs/CODEX.md`
+  - `tasks/DIAGNOSIS_AND_REFINEMENT.md`
+  - `tasks/RESULTS_SUMMARY.md`
+  - `tasks/EXPERIMENT_LOG.md`
+  - `tasks/RUN_LOG.md`
+- Reproducibility impact:
+  - positive: pair-construction behavior is now explicit, config-driven, and auditable through JSON/Markdown artifacts rather than hidden inside one utility scalar;
+  - the refinement runs reuse the same fixed `100 / 24 / 48` slice and saved scored traces, so the comparison block is directly reproducible from `--resume-from pairs`.
+- Commands:
+  - `source .venv/bin/activate && pytest -q tests/test_pairs.py tests/test_steps.py tests/test_losses.py`
+  - `source .venv/bin/activate && python -m compileall src scripts tests`
+  - `source .venv/bin/activate && python scripts/run_pairs.py --config configs/rtx4090_48gb_refine_step_current.yaml`
+  - `source .venv/bin/activate && python scripts/run_pairs.py --config configs/rtx4090_48gb_refine_step_correctness.yaml`
+  - `source .venv/bin/activate && python scripts/run_pairs.py --config configs/rtx4090_48gb_refine_step_strict.yaml`
+  - `source .venv/bin/activate && python scripts/run_pairs.py --config configs/rtx4090_48gb_refine_cw_current.yaml`
+  - `source .venv/bin/activate && python scripts/run_pairs.py --config configs/rtx4090_48gb_refine_cw_correctness.yaml`
+  - `source .venv/bin/activate && python scripts/run_pairs.py --config configs/rtx4090_48gb_refine_cw_strict.yaml`
+  - `source .venv/bin/activate && python scripts/run_pairs.py --config configs/rtx4090_48gb_refine_conf_filter_strict.yaml`
+  - `source .venv/bin/activate && python scripts/run_pairs.py --config configs/rtx4090_48gb_refine_cw_semi.yaml`
+  - `source .venv/bin/activate && python scripts/run_pairs.py --config configs/rtx4090_48gb_refine_cw_strict_strongverifier.yaml`
+  - `source .venv/bin/activate && export HF_HOME=/workspace/CWSPO/cwspo_repo/.hf_home && python scripts/run_pipeline.py --config configs/rtx4090_48gb_refine_step_current.yaml --with-train --with-final-eval --with-process-eval --resume-from pairs`
+  - `source .venv/bin/activate && export HF_HOME=/workspace/CWSPO/cwspo_repo/.hf_home && python scripts/run_pipeline.py --config configs/rtx4090_48gb_refine_step_correctness.yaml --with-train --with-final-eval --with-process-eval --resume-from pairs`
+  - `source .venv/bin/activate && export HF_HOME=/workspace/CWSPO/cwspo_repo/.hf_home && python scripts/run_pipeline.py --config configs/rtx4090_48gb_refine_step_strict.yaml --with-train --with-final-eval --with-process-eval --resume-from pairs`
+  - `source .venv/bin/activate && export HF_HOME=/workspace/CWSPO/cwspo_repo/.hf_home && python scripts/run_pipeline.py --config configs/rtx4090_48gb_refine_cw_current.yaml --with-train --with-final-eval --with-process-eval --resume-from pairs`
+  - `source .venv/bin/activate && export HF_HOME=/workspace/CWSPO/cwspo_repo/.hf_home && python scripts/run_pipeline.py --config configs/rtx4090_48gb_refine_cw_correctness.yaml --with-train --with-final-eval --with-process-eval --resume-from pairs`
+  - `source .venv/bin/activate && export HF_HOME=/workspace/CWSPO/cwspo_repo/.hf_home && python scripts/run_pipeline.py --config configs/rtx4090_48gb_refine_cw_strict.yaml --with-train --with-final-eval --with-process-eval --resume-from pairs`
+  - `source .venv/bin/activate && export HF_HOME=/workspace/CWSPO/cwspo_repo/.hf_home && python scripts/run_pipeline.py --config configs/rtx4090_48gb_refine_cw_strict_strongverifier.yaml --with-train --with-final-eval --with-process-eval --resume-from pairs`
+  - `source .venv/bin/activate && export HF_HOME=/workspace/CWSPO/cwspo_repo/.hf_home && python scripts/run_pipeline.py --config configs/rtx4090_48gb_refine_conf_filter_strict.yaml --with-train --with-final-eval --with-process-eval --resume-from pairs`
+- Run results:
+  - `step_current`: `536` pairs, `68` train steps, final accuracy `0.4167`
+  - `step_correctness`: `549` pairs, `70` train steps, final accuracy `0.4583`
+  - `step_strict`: `153` pairs, `20` train steps, final accuracy `0.4583`
+  - `cw_current`: `536` pairs, `68` train steps, final accuracy `0.4167`
+  - `cw_correctness`: `549` pairs, `70` train steps, final accuracy `0.4167`
+  - `cw_strict`: `153` pairs, `20` train steps, final accuracy `0.5000`
+  - `conf_filter_strict`: `138` pairs, `18` train steps, final accuracy `0.5000`
+  - `cw_strict_strongverifier`: `153` pairs, `20` train steps, final accuracy `0.4583`
+- Pair-quality interpretation:
+  - `current_utility` validated the contamination diagnosis directly: only `20.0%` of kept local pairs were strictly instructional, `72.6%` were ambiguous, and `7.5%` were mixed-correctness pairs oriented against final correctness.
+  - `correctness_priority` removed the wrong-way mixed-correctness pairs, but it still kept `389` same-correctness utility-oriented local pairs.
+  - `strict_purified` removed all ambiguous kept pairs and retained only mixed-correctness correctness-oriented examples, but it dropped about `74%` of candidate comparisons.
+- Research interpretation:
+  - engineering-relevant: yes, because the repo now has a real auditable pair-refinement stack rather than one opaque utility rule;
+  - research-relevant: yes, and the main signal is that purified local pairs were the missing ingredient;
+  - confidence weighting remains plausible on the purified target, but it has not yet separated from simple hard filtering;
+  - the strong verifier still did not improve downstream answer accuracy after purification.

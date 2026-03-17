@@ -49,7 +49,7 @@ def pairs(config: str):
     typer.echo(f"Wrote {len(pairs_)} pairs to {cfg.paths.pairs_file}")
 
 
-@app.command()
+@app.command("train")
 def train_cmd(config: str):
     cfg = load_config(config)
     ensure_dirs(cfg)
@@ -79,5 +79,9 @@ def eval_process(config: str, ground_truth: str):
     typer.echo(summary)
 
 
-if __name__ == "__main__":
+def main():
     app()
+
+
+if __name__ == "__main__":
+    main()

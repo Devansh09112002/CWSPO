@@ -9,6 +9,8 @@ class PromptRecord(BaseModel):
     id: str
     prompt: str
     answer: str
+    reference_solution: str | None = None
+    source_split: str | None = None
 
 
 class TraceRecord(BaseModel):
@@ -40,6 +42,7 @@ class PairRecord(BaseModel):
     preferred_steps: list[str]
     dispreferred_steps: list[str]
     weight: float
+    confidence: float | None = None
     features: dict[str, float]
     meta: dict[str, Any] = Field(default_factory=dict)
 
@@ -47,3 +50,8 @@ class PairRecord(BaseModel):
 class ProcessGroundTruthRecord(BaseModel):
     id: str
     gold_earliest_error_step: int
+    prompt: str | None = None
+    answer: str | None = None
+    correct_steps: list[str] | None = None
+    incorrect_steps: list[str] | None = None
+    incorrect_final_answer: str | None = None

@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from tqdm import tqdm
 
-from cwspo.models.hf import load_causal_lm
+from cwspo.models.hf import load_causal_lm, resolve_device_map
 from cwspo.schemas import PromptRecord, TraceRecord
 from cwspo.utils.math import extract_final_answer
 from cwspo.utils.steps import split_steps
@@ -13,7 +13,7 @@ def generate_traces(cfg, prompts: list[PromptRecord]) -> list[TraceRecord]:
         cfg.policy.model_name,
         dtype=cfg.dtype,
         trust_remote_code=cfg.policy.trust_remote_code,
-        device_map="auto",
+        device_map=resolve_device_map(cfg.device.policy),
         load_in_4bit=cfg.policy.load_in_4bit,
         attn_implementation=cfg.policy.attn_implementation,
     )

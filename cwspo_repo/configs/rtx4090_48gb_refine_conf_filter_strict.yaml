@@ -1,0 +1,114 @@
+seed: 42
+dtype: bf16
+
+device:
+  policy: cuda
+  verifier: cuda
+
+data:
+  dataset_name: openai/gsm8k
+  dataset_config_name: main
+  max_train_prompts: 100
+  max_eval_prompts: 24
+  max_process_examples: 48
+  prompt_sampling_seed: 42
+  append_step_by_step_suffix: true
+
+method:
+  name: confidence_filter_only
+  confidence_threshold: 0.66
+
+resume:
+  use_existing_traces: true
+  use_existing_scored: true
+  use_existing_pairs: false
+  use_existing_checkpoint: false
+  use_existing_final_eval: false
+  use_existing_process_eval: false
+
+diagnostics:
+  num_audit_samples_per_bucket: 8
+  pair_audit_seed: 42
+  histogram_bins: 10
+  num_orientation_audit_samples: 4
+
+paths:
+  prompt_file: data/real_small/gsm8k_train_100_seed42.jsonl
+  eval_prompt_file: data/real_small/gsm8k_eval_24_seed43.jsonl
+  process_ground_truth_file: data/real_small/process_eval_48_seed44.jsonl
+  output_dir: outputs/refinement/conf_filter_strict
+  traces_file: outputs/real_small/shared/train_traces.jsonl
+  scored_file: outputs/real_small/shared/scored_small_verifier.jsonl
+  pairs_file: outputs/refinement/conf_filter_strict/pairs.jsonl
+  train_metrics_file: outputs/refinement/conf_filter_strict/train_metrics.json
+  training_report_file: outputs/refinement/conf_filter_strict/training_report.json
+  training_report_md_file: outputs/refinement/conf_filter_strict/training_report.md
+  final_eval_file: outputs/refinement/conf_filter_strict/final_eval.json
+  process_eval_file: outputs/refinement/conf_filter_strict/process_eval.json
+  confidence_analysis_file: outputs/refinement/conf_filter_strict/confidence_analysis.json
+  confidence_report_file: outputs/refinement/conf_filter_strict/confidence_report.md
+  pair_audit_low_file: outputs/refinement/conf_filter_strict/pair_audit_low.md
+  pair_audit_mid_file: outputs/refinement/conf_filter_strict/pair_audit_mid.md
+  pair_audit_high_file: outputs/refinement/conf_filter_strict/pair_audit_high.md
+  pair_purity_report_file: outputs/refinement/conf_filter_strict/pair_purity_report.json
+  pair_orientation_audit_file: outputs/refinement/conf_filter_strict/pair_orientation_audit.md
+  process_failure_report_file: outputs/refinement/conf_filter_strict/process_failures.md
+  run_summary_file: outputs/refinement/conf_filter_strict/run_summary.json
+  checkpoint_dir: outputs/refinement/conf_filter_strict/checkpoints
+
+policy:
+  model_name: Qwen/Qwen2.5-Math-1.5B-Instruct
+  attn_implementation: flash_attention_2
+
+verifier:
+  mode: judge_token
+  model_name: Qwen/Qwen2.5-Math-1.5B-Instruct
+  prompt_template: |
+    You are a process verifier for mathematical reasoning.
+    Given the question and the partial solution below, decide whether the partial solution is still on a correct path.
+    Respond with exactly one token: good or bad.
+
+    Question:
+    {prompt}
+
+    Partial solution:
+    {prefix}
+
+    Verdict:
+  attn_implementation: flash_attention_2
+
+pair:
+  pair_mode: strict_purified
+  window_H: 2
+  alpha_local: 0.8
+  tau_pair: 0.08
+  min_weight: 0.0
+  max_pairs_per_prompt: 20
+  min_divergent_chars: 24
+  max_near_identical_similarity: 0.94
+  semi_purified_min_confidence: 0.82
+  semi_purified_min_utility_margin: 0.35
+  semi_purified_min_local_gap: 0.35
+
+confidence:
+  low_threshold: 0.33
+  high_threshold: 0.66
+
+training:
+  model_name: Qwen/Qwen2.5-Math-1.5B-Instruct
+  reference_model_name: Qwen/Qwen2.5-Math-1.5B-Instruct
+  target_modules: [q_proj, k_proj, v_proj, o_proj, gate_proj, up_proj, down_proj]
+  batch_size: 2
+  grad_accum_steps: 8
+  num_epochs: 2
+  lr: 2.0e-5
+  beta: 0.1
+  lambda_ref: 0.0
+  log_every: 5
+  save_every: 100
+  max_length: 2048
+  attn_implementation: flash_attention_2
+
+evaluation:
+  batch_size: 4
+  max_new_tokens: 256

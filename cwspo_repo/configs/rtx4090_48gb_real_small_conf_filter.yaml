@@ -1,0 +1,137 @@
+seed: 42
+
+dtype: bf16
+
+device:
+  policy: cuda
+  verifier: cuda
+
+data:
+  dataset_name: openai/gsm8k
+  dataset_config_name: main
+  max_train_prompts: 100
+  max_eval_prompts: 24
+  max_process_examples: 48
+  prompt_sampling_seed: 42
+  append_step_by_step_suffix: true
+
+method:
+  name: confidence_filter_only
+  confidence_threshold: 0.6
+
+resume:
+  use_existing_traces: true
+  use_existing_scored: true
+  use_existing_pairs: false
+  use_existing_checkpoint: false
+  use_existing_final_eval: false
+  use_existing_process_eval: false
+
+diagnostics:
+  num_audit_samples_per_bucket: 8
+  pair_audit_seed: 42
+  histogram_bins: 10
+
+paths:
+  prompt_file: data/real_small/gsm8k_train_100_seed42.jsonl
+  eval_prompt_file: data/real_small/gsm8k_eval_24_seed43.jsonl
+  process_ground_truth_file: data/real_small/process_eval_48_seed44.jsonl
+  output_dir: outputs/real_small/conf_filter_smallverifier
+  traces_file: outputs/real_small/shared/train_traces.jsonl
+  scored_file: outputs/real_small/shared/scored_small_verifier.jsonl
+  pairs_file: outputs/real_small/conf_filter_smallverifier/pairs.jsonl
+  train_metrics_file: outputs/real_small/conf_filter_smallverifier/train_metrics.json
+  training_report_file: outputs/real_small/conf_filter_smallverifier/training_report.json
+  training_report_md_file: outputs/real_small/conf_filter_smallverifier/training_report.md
+  final_eval_file: outputs/real_small/conf_filter_smallverifier/final_eval.json
+  process_eval_file: outputs/real_small/conf_filter_smallverifier/process_eval.json
+  confidence_analysis_file: outputs/real_small/conf_filter_smallverifier/confidence_analysis.json
+  confidence_report_file: outputs/real_small/conf_filter_smallverifier/confidence_report.md
+  pair_audit_low_file: outputs/real_small/conf_filter_smallverifier/pair_audit_low.md
+  pair_audit_mid_file: outputs/real_small/conf_filter_smallverifier/pair_audit_mid.md
+  pair_audit_high_file: outputs/real_small/conf_filter_smallverifier/pair_audit_high.md
+  process_failure_report_file: outputs/real_small/conf_filter_smallverifier/process_failures.md
+  run_summary_file: outputs/real_small/conf_filter_smallverifier/run_summary.json
+  checkpoint_dir: outputs/real_small/conf_filter_smallverifier/checkpoints
+
+policy:
+  model_name: Qwen/Qwen2.5-Math-1.5B-Instruct
+  trust_remote_code: true
+  max_new_tokens: 256
+  do_sample: true
+  temperature: 0.7
+  top_p: 0.95
+  num_return_sequences: 4
+  load_in_4bit: false
+  attn_implementation: flash_attention_2
+
+verifier:
+  mode: judge_token
+  model_name: Qwen/Qwen2.5-Math-1.5B-Instruct
+  trust_remote_code: true
+  positive_token: good
+  negative_token: bad
+  prompt_template: |
+    You are a process verifier for mathematical reasoning.
+    Given the question and the partial solution below, decide whether the partial solution is still on a correct path.
+    Respond with exactly one token: good or bad.
+
+    Question:
+    {prompt}
+
+    Partial solution:
+    {prefix}
+
+    Verdict:
+  load_in_4bit: false
+  attn_implementation: flash_attention_2
+
+pair:
+  window_H: 2
+  alpha_local: 0.8
+  tau_pair: 0.08
+  min_weight: 0.0
+  max_pairs_per_prompt: 20
+
+confidence:
+  tau_margin: 0.05
+  scale_margin: 0.10
+  scale_drop: 0.25
+  gamma_margin: 0.40
+  gamma_sharp: 0.20
+  gamma_agree: 0.20
+  gamma_out: 0.20
+  use_margin: true
+  use_sharp: true
+  use_agree: true
+  use_out: true
+  low_threshold: 0.33
+  high_threshold: 0.66
+
+training:
+  model_name: Qwen/Qwen2.5-Math-1.5B-Instruct
+  reference_model_name: Qwen/Qwen2.5-Math-1.5B-Instruct
+  trust_remote_code: true
+  use_lora: true
+  lora_r: 16
+  lora_alpha: 32
+  lora_dropout: 0.05
+  target_modules: [q_proj, k_proj, v_proj, o_proj, gate_proj, up_proj, down_proj]
+  batch_size: 2
+  grad_accum_steps: 8
+  num_epochs: 2
+  lr: 2.0e-5
+  weight_decay: 0.0
+  max_grad_norm: 1.0
+  warmup_ratio: 0.03
+  beta: 0.1
+  lambda_ref: 0.0
+  log_every: 5
+  save_every: 100
+  max_length: 2048
+  load_in_4bit: false
+  attn_implementation: flash_attention_2
+
+evaluation:
+  batch_size: 4
+  max_new_tokens: 256

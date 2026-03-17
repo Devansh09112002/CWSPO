@@ -8,7 +8,8 @@ from cwspo.utils.math import is_correct_answer
 
 
 def score_traces(cfg, traces: list[TraceRecord]) -> list[ScoredTraceRecord]:
-    verifier = build_verifier(cfg.verifier, dtype=cfg.dtype)
+    verifier_cfg = cfg.verifier.model_copy(update={"device": cfg.device.verifier})
+    verifier = build_verifier(verifier_cfg, dtype=cfg.dtype)
     scored: list[ScoredTraceRecord] = []
     for tr in tqdm(traces, desc="Scoring traces"):
         prefix = ""
