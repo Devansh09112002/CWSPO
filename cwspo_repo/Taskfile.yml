@@ -1,0 +1,64 @@
+version: '3'
+
+tasks:
+  generate:
+    cmds:
+      - python scripts/run_generate.py --config {{.CONFIG}}
+    vars:
+      CONFIG: configs/minimal.yaml
+
+  score:
+    cmds:
+      - python scripts/run_score.py --config {{.CONFIG}}
+    vars:
+      CONFIG: configs/minimal.yaml
+
+  pairs:
+    cmds:
+      - python scripts/run_pairs.py --config {{.CONFIG}}
+    vars:
+      CONFIG: configs/minimal.yaml
+
+  train:
+    cmds:
+      - python scripts/run_train.py --config {{.CONFIG}}
+    vars:
+      CONFIG: configs/minimal.yaml
+
+  eval-final:
+    cmds:
+      - python scripts/run_eval_final.py --config {{.CONFIG}}
+    vars:
+      CONFIG: configs/minimal.yaml
+
+  eval-process:
+    cmds:
+      - python scripts/run_eval_process.py --config {{.CONFIG}} --ground-truth {{.GT}}
+    vars:
+      CONFIG: configs/minimal.yaml
+      GT: examples/sample_processbench_like.jsonl
+
+  pipeline:
+    cmds:
+      - python scripts/run_pipeline.py --config {{.CONFIG}} {{.FLAGS}}
+    vars:
+      CONFIG: configs/minimal.yaml
+      FLAGS: ''
+
+  smoke:
+    cmds:
+      - bash scripts/smoke_test.sh {{.CONFIG}}
+    vars:
+      CONFIG: configs/minimal.yaml
+
+  bootstrap:
+    cmds:
+      - bash scripts/bootstrap_venv.sh
+
+  pipeline-4090:
+    cmds:
+      - python scripts/run_pipeline.py --config configs/rtx4090_48gb_minimal.yaml --with-train --with-final-eval --with-process-eval --ground-truth examples/sample_processbench_like.jsonl
+
+  pipeline-4090-strong:
+    cmds:
+      - python scripts/run_pipeline.py --config configs/rtx4090_48gb_strong.yaml --with-train --with-final-eval --with-process-eval --ground-truth examples/sample_processbench_like.jsonl

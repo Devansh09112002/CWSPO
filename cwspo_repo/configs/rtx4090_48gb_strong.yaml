@@ -1,0 +1,94 @@
+seed: 42
+
+dtype: bf16
+
+device:
+  policy: cuda
+  verifier: cuda
+
+paths:
+  prompt_file: examples/sample_math.jsonl
+  output_dir: outputs/rtx4090_strong
+  traces_file: outputs/rtx4090_strong/traces.jsonl
+  scored_file: outputs/rtx4090_strong/scored.jsonl
+  pairs_file: outputs/rtx4090_strong/pairs.jsonl
+  train_metrics_file: outputs/rtx4090_strong/train_metrics.json
+  final_eval_file: outputs/rtx4090_strong/final_eval.json
+  process_eval_file: outputs/rtx4090_strong/process_eval.json
+  checkpoint_dir: outputs/rtx4090_strong/checkpoints
+
+policy:
+  model_name: Qwen/Qwen2.5-Math-1.5B-Instruct
+  trust_remote_code: true
+  max_new_tokens: 320
+  do_sample: true
+  temperature: 0.7
+  top_p: 0.95
+  num_return_sequences: 8
+  load_in_4bit: false
+  attn_implementation: flash_attention_2
+
+verifier:
+  mode: judge_token
+  model_name: Qwen/Qwen2.5-Math-7B-PRM800K
+  trust_remote_code: true
+  positive_token: +
+  negative_token: -
+  prompt_template: |
+    You are a process verifier for mathematical reasoning.
+    Given the question and the partial solution below, decide whether the partial solution is still on a correct path.
+    Respond with exactly one token: + or -.
+
+    Question:
+    {prompt}
+
+    Partial solution:
+    {prefix}
+
+    Verdict:
+  load_in_4bit: true
+  attn_implementation: flash_attention_2
+
+pair:
+  window_H: 2
+  alpha_local: 0.8
+  tau_pair: 0.1
+  min_weight: 0.2
+  max_pairs_per_prompt: 20
+
+confidence:
+  tau_margin: 0.05
+  scale_margin: 0.10
+  scale_drop: 0.25
+  gamma_margin: 0.40
+  gamma_sharp: 0.20
+  gamma_agree: 0.20
+  gamma_out: 0.20
+
+training:
+  model_name: Qwen/Qwen2.5-Math-1.5B-Instruct
+  reference_model_name: Qwen/Qwen2.5-Math-1.5B-Instruct
+  trust_remote_code: true
+  use_lora: true
+  lora_r: 32
+  lora_alpha: 64
+  lora_dropout: 0.05
+  target_modules: [q_proj, k_proj, v_proj, o_proj, gate_proj, up_proj, down_proj]
+  batch_size: 2
+  grad_accum_steps: 8
+  num_epochs: 1
+  lr: 2.0e-5
+  weight_decay: 0.0
+  max_grad_norm: 1.0
+  warmup_ratio: 0.03
+  beta: 0.1
+  lambda_ref: 0.05
+  log_every: 10
+  save_every: 200
+  max_length: 2048
+  load_in_4bit: false
+  attn_implementation: flash_attention_2
+
+evaluation:
+  batch_size: 4
+  max_new_tokens: 320

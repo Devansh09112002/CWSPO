@@ -1,0 +1,93 @@
+seed: 42
+
+dtype: bf16
+
+device:
+  policy: cuda
+  verifier: cuda
+
+paths:
+  prompt_file: examples/sample_math.jsonl
+  output_dir: outputs/strong_run
+  traces_file: outputs/strong_run/traces.jsonl
+  scored_file: outputs/strong_run/scored.jsonl
+  pairs_file: outputs/strong_run/pairs.jsonl
+  train_metrics_file: outputs/strong_run/train_metrics.json
+  final_eval_file: outputs/strong_run/final_eval.json
+  process_eval_file: outputs/strong_run/process_eval.json
+  checkpoint_dir: outputs/strong_run/checkpoints
+
+policy:
+  model_name: Qwen/Qwen2.5-Math-1.5B-Instruct
+  trust_remote_code: true
+  max_new_tokens: 320
+  do_sample: true
+  temperature: 0.7
+  top_p: 0.95
+  num_return_sequences: 6
+  load_in_4bit: false
+  attn_implementation: null
+
+verifier:
+  mode: judge_token
+  model_name: Qwen/Qwen2.5-Math-7B-PRM800K
+  trust_remote_code: true
+  positive_token: +
+  negative_token: -
+  prompt_template: |
+    Evaluate whether the following partial mathematical solution is still logically progressing toward a correct final answer.
+    Respond with exactly one token: + or -
+
+    Problem:
+    {prompt}
+
+    Partial solution:
+    {prefix}
+
+    Verdict:
+  load_in_4bit: false
+  attn_implementation: null
+
+pair:
+  window_H: 3
+  alpha_local: 0.85
+  tau_pair: 0.12
+  min_weight: 0.25
+  max_pairs_per_prompt: 16
+
+confidence:
+  tau_margin: 0.06
+  scale_margin: 0.12
+  scale_drop: 0.30
+  gamma_margin: 0.35
+  gamma_sharp: 0.20
+  gamma_agree: 0.20
+  gamma_out: 0.25
+
+training:
+  model_name: Qwen/Qwen2.5-Math-1.5B-Instruct
+  reference_model_name: Qwen/Qwen2.5-Math-1.5B-Instruct
+  trust_remote_code: true
+  use_lora: true
+  lora_r: 32
+  lora_alpha: 64
+  lora_dropout: 0.05
+  target_modules: [q_proj, k_proj, v_proj, o_proj, gate_proj, up_proj, down_proj]
+  batch_size: 1
+  grad_accum_steps: 8
+  num_epochs: 2
+  lr: 1.0e-5
+  weight_decay: 0.0
+  max_grad_norm: 1.0
+  warmup_ratio: 0.05
+  beta: 0.15
+  lambda_ref: 0.02
+  log_every: 10
+  save_every: 200
+  max_length: 2048
+  load_in_4bit: false
+  attn_implementation: null
+
+evaluation:
+  batch_size: 4
+  max_new_tokens: 320

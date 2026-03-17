@@ -1,0 +1,10 @@
+# Optional dataset notes and schema references.
+prompt_schema:
+  id: string
+  prompt: string
+  answer: string
+
+process_bench_like_schema:
+  id: string
+  prompt: string
+  gold_earliest_error_step: integer
