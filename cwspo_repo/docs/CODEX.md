@@ -60,6 +60,7 @@ Optional tiebreak and low-priority recovery run:
 ```bash
 python scripts/run_pipeline.py --config configs/rtx4090_48gb_refine_conf_filter_strict.yaml --with-train --with-final-eval --with-process-eval --resume-from pairs
 python scripts/run_pipeline.py --config configs/rtx4090_48gb_refine_cw_semi.yaml --with-train --with-final-eval --with-process-eval --resume-from pairs
+python scripts/run_pipeline.py --config configs/rtx4090_48gb_refine_cw_strict_lambda_ref.yaml --with-train --with-final-eval --with-process-eval --resume-from pairs
 ```
 
 6. Only after the purified small-verifier runs are stable, run the stronger-offline-verifier purified comparison.
@@ -146,6 +147,7 @@ Per-run artifacts:
 - `confidence_report.md`
 - `pair_purity_report.json`
 - `pair_orientation_audit.md`
+- `diagnosis_summary.md`
 - `pair_audit_low.md`
 - `pair_audit_mid.md`
 - `pair_audit_high.md`
@@ -164,9 +166,10 @@ Per-run artifacts:
 3. Read the pair audit markdown files before trusting training.
 4. Inspect `pair_purity_report.json` and `pair_orientation_audit.md` before trusting local supervision.
 5. Inspect `confidence_report.md` before trusting the confidence mechanism.
-6. Compare `current_utility` vs `correctness_priority` vs `strict_purified` before scaling.
-7. Confirm `final_eval.json` shows `adapter_loaded: true` before interpreting answer accuracy.
-8. Read `process_failures.md` before trusting process metrics.
+6. Inspect `diagnosis_summary.md` before writing any run-level conclusion.
+7. Compare `current_utility` vs `correctness_priority` vs `strict_purified` before scaling.
+8. Confirm `final_eval.json` shows `adapter_loaded: true` before interpreting answer accuracy.
+9. Read `process_failures.md` before trusting process metrics.
 
 ## Runtime caveats on a 48 GB RTX 4090
 
@@ -184,6 +187,7 @@ Practical notes:
 - the current `process_eval.json` artifact is an offline fixed-trace boundary diagnostic, not a trained-policy process benchmark
 - the refinement configs under `configs/rtx4090_48gb_refine_*.yaml` reuse the same `100 / 24 / 48` slice, so they are directly comparable if you keep `--resume-from pairs`
 - from `--resume-from pairs`, the `549`-pair correctness-priority runs take about `8-9` minutes end-to-end, while the `153`-pair strict-purified runs take about `4-5` minutes end-to-end
+- the repaired `semi_purified` builder now writes explicit keep/drop reason codes, so use `pair_purity_report.json` and `diagnosis_summary.md` together when checking whether same-correctness recovery was real or just noisy
 
 ## Progression path
 
@@ -213,6 +217,13 @@ Goal:
 Current checked-in outcome:
 - the strong verifier did not beat the small-verifier `strict_purified` run on held-out answer accuracy,
 - so keep it as an optional comparison backend, not the default next step.
+
+## Current research stance
+
+- Read `tasks/SERIOUS_DIAGNOSIS.md` before making any project-level claim.
+- Treat `strict_purified` as the default local target.
+- Treat `semi_purified` as a controlled admissibility experiment, not as a larger unfiltered target.
+- Use `lambda_ref` only on purified targets first.
 
 ### Stage 3: optional 7B policy later
 

@@ -63,6 +63,82 @@ def sigmoid(x: float) -> float:
     return 1.0 / (1.0 + np.exp(-x))
 
 
+_GENERIC_PREAMBLE_PHRASES = (
+    "let's break down",
+    "lets break down",
+    "let's solve",
+    "lets solve",
+    "step by step",
+    "follow these steps",
+    "we need to",
+    "to determine",
+    "let us",
+    "first,",
+    "first ",
+)
+
+_CONTENT_STOPWORDS = {
+    "the",
+    "and",
+    "for",
+    "that",
+    "with",
+    "this",
+    "from",
+    "there",
+    "then",
+    "into",
+    "have",
+    "has",
+    "had",
+    "will",
+    "would",
+    "should",
+    "could",
+    "need",
+    "needs",
+    "show",
+    "your",
+    "reasoning",
+    "step",
+    "steps",
+    "problem",
+    "follow",
+    "these",
+    "solve",
+    "determine",
+    "calculate",
+    "using",
+    "after",
+    "before",
+    "each",
+    "total",
+}
+
+
+def _alnum_signature(text: str) -> str:
+    return "".join(ch for ch in canon(text) if ch.isalnum())
+
+
+def _content_tokens(text: str) -> set[str]:
+    tokens = {
+        token
+        for token in canon(text).split()
+        if len(token) >= 3 and token not in _CONTENT_STOPWORDS
+    }
+    return tokens
+
+
+def _contains_math_signal(text: str) -> bool:
+    canonical = canon(text)
+    return any(ch.isdigit() for ch in canonical) or any(op in canonical for op in ("+", "-", "*", "/", "="))
+
+
+def _looks_like_generic_preamble(text: str) -> bool:
+    canonical = canon(text)
+    return any(phrase in canonical for phrase in _GENERIC_PREAMBLE_PHRASES)
+
+
 def estimate_support_stats(
     traces: list[ScoredTraceRecord],
     k: int,
@@ -90,6 +166,7 @@ def estimate_support_stats(
         "n_other": n_other,
         "p_corr_pref": p_corr_pref,
         "p_corr_other": p_corr_other,
+        "support_gap": p_corr_pref - p_corr_other,
     }
 
 
@@ -190,6 +267,8 @@ def _divergence_diagnostics(
 ) -> dict[str, Any]:
     a_seg = a.steps[k : min(len(a.steps), k + h)]
     b_seg = b.steps[k : min(len(b.steps), k + h)]
+    a_text = _segment_text(a_seg)
+    b_text = _segment_text(b_seg)
     sig_a = _segment_signature(a_seg)
     sig_b = _segment_signature(b_seg)
     similarity = _segment_similarity(a_seg, b_seg)
@@ -198,13 +277,41 @@ def _divergence_diagnostics(
     exact_match = sig_a == sig_b
     near_identical = similarity >= float(getattr(cfg.pair, "max_near_identical_similarity", 0.94))
     reconverges = _reconverges_after_boundary(a, b, k, h)
-    weak_divergence = bool(too_short or exact_match or near_identical or reconverges)
+    formatting_only = bool(_alnum_signature(a_text) == _alnum_signature(b_text))
+    a_tokens = _content_tokens(a_text)
+    b_tokens = _content_tokens(b_text)
+    trivial_difference = bool(
+        too_short
+        or (
+            a_tokens == b_tokens
+            and not _contains_math_signal(a_text)
+            and not _contains_math_signal(b_text)
+        )
+    )
+    boilerplate_only = bool(
+        _looks_like_generic_preamble(a_text)
+        and _looks_like_generic_preamble(b_text)
+        and not _contains_math_signal(a_text)
+        and not _contains_math_signal(b_text)
+    )
+    weak_divergence = bool(
+        too_short
+        or exact_match
+        or formatting_only
+        or near_identical
+        or reconverges
+        or trivial_difference
+        or boilerplate_only
+    )
     return {
         "similarity": float(similarity),
         "min_chars": int(min_chars),
         "too_short": bool(too_short),
         "exact_match": bool(exact_match),
+        "formatting_only": bool(formatting_only),
         "near_identical": bool(near_identical),
+        "trivial_difference": bool(trivial_difference),
+        "boilerplate_only": bool(boilerplate_only),
         "reconverges_after_boundary": bool(reconverges),
         "weak_divergence": bool(weak_divergence),
     }
@@ -220,10 +327,54 @@ def _correctness_pattern(pref_correct: bool, disp_correct: bool) -> str:
     return "both_wrong"
 
 
+def _correctness_bucket(a_correct: bool | None, b_correct: bool | None) -> str:
+    if a_correct is None or b_correct is None:
+        return "unresolved"
+    if a_correct != b_correct:
+        return "mixed_correctness"
+    if a_correct:
+        return "both_correct"
+    return "both_wrong"
+
+
+def _is_kept_status(status: str | None) -> bool:
+    return bool(status and status.startswith("kept"))
+
+
+def _confidence_bucket(confidence: float | None, cfg) -> str:
+    if confidence is None:
+        return "unknown"
+    if confidence < float(getattr(cfg.confidence, "low_threshold", 0.33)):
+        return "low"
+    if confidence >= float(getattr(cfg.confidence, "high_threshold", 0.66)):
+        return "high"
+    return "medium"
+
+
+def _value_counts(decisions: list[dict[str, Any]], key: str) -> dict[str, int]:
+    counts: Counter[str] = Counter()
+    for row in decisions:
+        value = row.get(key) or "unknown"
+        counts[str(value)] += 1
+    return dict(sorted(counts.items()))
+
+
+def _divergence_quality_counts(decisions: list[dict[str, Any]]) -> dict[str, int]:
+    return {
+        "weak_divergence": sum(int(bool(row.get("weak_divergence"))) for row in decisions),
+        "formatting_only": sum(int(bool(row.get("formatting_only_divergence"))) for row in decisions),
+        "near_identical": sum(int(bool(row.get("near_identical_divergence"))) for row in decisions),
+        "trivial_difference": sum(int(bool(row.get("trivial_difference_divergence"))) for row in decisions),
+        "boilerplate_only": sum(int(bool(row.get("boilerplate_only_divergence"))) for row in decisions),
+        "unstable_boundary": sum(int(bool(row.get("boundary_unstable"))) for row in decisions),
+        "degenerate_divergence": sum(int(bool(row.get("degenerate_divergence"))) for row in decisions),
+    }
+
+
 def _orientation_counts(decisions: list[dict[str, Any]]) -> dict[str, int]:
     counts: Counter[str] = Counter()
     for row in decisions:
-        if row.get("final_status") != "kept":
+        if not _is_kept_status(row.get("final_status")):
             continue
         reason = row.get("orientation_reason") or "unknown"
         counts[reason] += 1
@@ -243,7 +394,7 @@ def _pair_taxonomy_counts(decisions: list[dict[str, Any]]) -> dict[str, int]:
     for row in decisions:
         if row.get("weak_divergence"):
             counts["same_prefix_but_weak_divergence"] += 1
-        if row.get("final_status") != "kept":
+        if not _is_kept_status(row.get("final_status")):
             counts["unresolved_or_skipped"] += 1
             continue
         pattern = row.get("correctness_pattern")
@@ -252,7 +403,7 @@ def _pair_taxonomy_counts(decisions: list[dict[str, Any]]) -> dict[str, int]:
         if row.get("orientation_reason") in {
             "current_utility",
             "correctness_priority_same_correctness_utility",
-            "semi_purified_same_correctness_strong_local_preference",
+            "semi_purified_same_correctness_utility_screening",
         } and pattern in {"both_correct", "both_wrong"}:
             counts["same_correctness_but_utility_oriented"] += 1
     return counts
@@ -271,12 +422,17 @@ def _build_pair_purity_report(
 ) -> dict[str, Any]:
     status_counts: Counter[str] = Counter(row.get("final_status", "unknown") for row in decisions)
     total = len(decisions)
-    kept = [row for row in decisions if row.get("final_status") == "kept"]
+    kept = [row for row in decisions if _is_kept_status(row.get("final_status"))]
     weak = [row for row in decisions if row.get("weak_divergence")]
     near_identical = [row for row in decisions if row.get("near_identical_divergence")]
     degenerate = [row for row in decisions if row.get("degenerate_divergence")]
     unstable = [row for row in decisions if row.get("boundary_unstable")]
-    short_regions = [row for row in decisions if row.get("divergent_min_chars", 0) < getattr(cfg.pair, "min_divergent_chars", 24)]
+    short_regions = [
+        row
+        for row in decisions
+        if (row.get("divergent_min_chars") if row.get("divergent_min_chars") is not None else 0)
+        < getattr(cfg.pair, "min_divergent_chars", 24)
+    ]
 
     correctness_driven = sum(
         1
@@ -295,7 +451,7 @@ def _build_pair_purity_report(
         in {
             "current_utility",
             "correctness_priority_same_correctness_utility",
-            "semi_purified_same_correctness_strong_local_preference",
+            "semi_purified_same_correctness_utility_screening",
         }
     )
     taxonomy = _pair_taxonomy_counts(decisions)
@@ -310,6 +466,14 @@ def _build_pair_purity_report(
         "num_kept_pairs": len(kept),
         "num_dropped_by_confidence": num_dropped_by_confidence,
         "status_counts": dict(sorted(status_counts.items())),
+        "admissibility_diagnostics": {
+            "reason_code_counts": dict(sorted(status_counts.items())),
+            "correctness_bucket_counts": _value_counts(decisions, "correctness_bucket"),
+            "kept_correctness_pattern_counts": _value_counts(kept, "correctness_pattern"),
+            "pair_mode_counts": _value_counts(decisions, "pair_mode"),
+            "confidence_bucket_counts": _value_counts(decisions, "confidence_bucket"),
+            "divergence_quality_counts": _divergence_quality_counts(decisions),
+        },
         "pair_taxonomy": taxonomy,
         "pair_purity_metrics": {
             "fraction_strictly_instructional_pairs": float(taxonomy["correct_vs_incorrect"] / max(1, len(kept))) if kept else None,
@@ -317,9 +481,13 @@ def _build_pair_purity_report(
             "fraction_misoriented_mixed_correctness_pairs": float(taxonomy["incorrect_vs_correct"] / max(1, len(kept))) if kept else None,
             "fraction_dropped_by_purification": float(
                 (
-                    status_counts.get("dropped_strict_purified_same_correctness", 0)
-                    + status_counts.get("dropped_strict_purified_weak_divergence", 0)
-                    + status_counts.get("dropped_semi_purified_same_correctness_not_stable", 0)
+                    status_counts.get("dropped_both_correct_ambiguous", 0)
+                    + status_counts.get("dropped_both_wrong_uninformative", 0)
+                    + status_counts.get("dropped_weak_divergence", 0)
+                    + status_counts.get("dropped_trivial_segment_difference", 0)
+                    + status_counts.get("dropped_near_identical", 0)
+                    + status_counts.get("dropped_formatting_only", 0)
+                    + status_counts.get("dropped_unstable_boundary", 0)
                 )
                 / max(1, total)
             ),
@@ -336,6 +504,62 @@ def _build_pair_purity_report(
         },
         "orientation_counts": _orientation_counts(decisions),
     }
+
+
+def _divergence_reason_code(pair_mode: str, divergence: dict[str, Any]) -> str | None:
+    if pair_mode not in {"strict_purified", "semi_purified"}:
+        return None
+    if divergence.get("formatting_only"):
+        return "dropped_formatting_only"
+    if divergence.get("near_identical"):
+        return "dropped_near_identical"
+    if divergence.get("reconverges_after_boundary"):
+        return "dropped_unstable_boundary"
+    if divergence.get("trivial_difference") or divergence.get("boilerplate_only"):
+        return "dropped_trivial_segment_difference"
+    if divergence.get("weak_divergence"):
+        return "dropped_weak_divergence"
+    return None
+
+
+def _semi_purified_same_correctness_reason_code(
+    *,
+    cfg,
+    pref: ScoredTraceRecord,
+    disp: ScoredTraceRecord,
+    pref_info: dict[str, Any],
+    disp_info: dict[str, Any],
+    support: dict[str, float],
+    feats: dict[str, float],
+) -> str:
+    confidence = float(feats["confidence"])
+    utility_margin = abs(float(pref_info["utility"]) - float(disp_info["utility"]))
+    local_gap = abs(float(pref_info["local_score"]) - float(disp_info["local_score"]))
+    support_gap = float(support.get("support_gap", 0.0))
+    drop_advantage = float(disp_info["drop_at_k"]) - float(pref_info["drop_at_k"])
+
+    if confidence < float(getattr(cfg.pair, "semi_purified_min_confidence", 0.82)):
+        return "dropped_same_correctness_low_confidence"
+
+    if pref.final_correct and disp.final_correct:
+        if (
+            utility_margin >= float(getattr(cfg.pair, "semi_purified_both_correct_min_utility_margin", 0.25))
+            and local_gap >= float(getattr(cfg.pair, "semi_purified_both_correct_min_local_gap", 0.20))
+            and confidence >= float(getattr(cfg.pair, "semi_purified_both_correct_min_confidence", 0.76))
+            and support_gap >= float(getattr(cfg.pair, "semi_purified_both_correct_min_support_gap", 0.05))
+        ):
+            return "kept_both_correct_strong_local_preference"
+        return "dropped_both_correct_ambiguous"
+
+    if (
+        utility_margin >= float(getattr(cfg.pair, "semi_purified_both_wrong_min_utility_margin", 0.45))
+        and local_gap >= float(getattr(cfg.pair, "semi_purified_both_wrong_min_local_gap", 0.35))
+        and confidence >= float(getattr(cfg.pair, "semi_purified_both_wrong_min_confidence", 0.88))
+        and support_gap >= float(getattr(cfg.pair, "semi_purified_both_wrong_min_support_gap", 0.10))
+        and drop_advantage >= float(getattr(cfg.pair, "semi_purified_both_wrong_min_drop_advantage", 0.15))
+    ):
+        return "kept_both_wrong_delayed_error"
+    return "dropped_both_wrong_uninformative"
 
 
 def _pair_mode_decision(
@@ -373,9 +597,7 @@ def _pair_mode_decision(
 
     if pair_mode == "strict_purified":
         if a_correct == b_correct:
-            return None, None, None, None, "dropped_strict_purified_same_correctness"
-        if divergence["weak_divergence"]:
-            return None, None, None, None, "dropped_strict_purified_weak_divergence"
+            return None, None, None, None, "dropped_both_correct_ambiguous" if a_correct else "dropped_both_wrong_uninformative"
         if a_correct:
             return a, b, a_info, b_info, "strict_purified_final_correctness"
         return b, a, b_info, a_info, "strict_purified_final_correctness"
@@ -387,23 +609,25 @@ def _pair_mode_decision(
             return b, a, b_info, a_info, "semi_purified_final_correctness"
         if utility_margin < cfg.pair.tau_pair:
             return None, None, None, None, "dropped_utility_margin_below_tau_pair"
-        if divergence["weak_divergence"]:
-            return None, None, None, None, "dropped_semi_purified_same_correctness_not_stable"
         if float(a_info["utility"]) >= float(b_info["utility"]):
-            return a, b, a_info, b_info, "semi_purified_same_correctness_strong_local_preference"
-        return b, a, b_info, a_info, "semi_purified_same_correctness_strong_local_preference"
+            return a, b, a_info, b_info, "semi_purified_same_correctness_utility_screening"
+        return b, a, b_info, a_info, "semi_purified_same_correctness_utility_screening"
 
     raise ValueError(f"Unknown pair mode: {pair_mode}")
 
 
 def _make_decision_row(
     *,
+    low_threshold: float,
+    high_threshold: float,
     pair_mode: str,
     prompt_id: str,
     prompt: str,
     prefix_steps: list[str],
     preferred_steps: list[str],
     dispreferred_steps: list[str],
+    trace_a: ScoredTraceRecord | None,
+    trace_b: ScoredTraceRecord | None,
     pref: ScoredTraceRecord | None,
     disp: ScoredTraceRecord | None,
     k: int | None,
@@ -412,13 +636,68 @@ def _make_decision_row(
     features: dict[str, float] | None,
     a_info: dict[str, Any] | None,
     b_info: dict[str, Any] | None,
+    support: dict[str, Any] | None,
     divergence: dict[str, Any] | None,
     final_status: str,
 ) -> dict[str, Any]:
+    a_correct = bool(trace_a.final_correct) if trace_a is not None else None
+    b_correct = bool(trace_b.final_correct) if trace_b is not None else None
     pref_correct = bool(pref.final_correct) if pref is not None else None
     disp_correct = bool(disp.final_correct) if disp is not None else None
     pattern = _correctness_pattern(pref_correct, disp_correct) if pref is not None and disp is not None else "unresolved"
     weak_divergence = bool(divergence["weak_divergence"]) if divergence else False
+    conf_value = float(confidence) if confidence is not None else None
+    if conf_value is None:
+        confidence_bucket = "unknown"
+    elif conf_value < low_threshold:
+        confidence_bucket = "low"
+    elif conf_value >= high_threshold:
+        confidence_bucket = "high"
+    else:
+        confidence_bucket = "medium"
+
+    pref_utility = (
+        float((a_info or {}).get("utility"))
+        if a_info and pref is not None and a_info.get("trace_id") == pref.trace_id
+        else float((b_info or {}).get("utility"))
+        if b_info and pref is not None
+        else None
+    )
+    disp_utility = (
+        float((a_info or {}).get("utility"))
+        if a_info and disp is not None and a_info.get("trace_id") == disp.trace_id
+        else float((b_info or {}).get("utility"))
+        if b_info and disp is not None
+        else None
+    )
+    pref_local_score = (
+        float((a_info or {}).get("local_score"))
+        if a_info and pref is not None and a_info.get("trace_id") == pref.trace_id
+        else float((b_info or {}).get("local_score"))
+        if b_info and pref is not None
+        else None
+    )
+    disp_local_score = (
+        float((a_info or {}).get("local_score"))
+        if a_info and disp is not None and a_info.get("trace_id") == disp.trace_id
+        else float((b_info or {}).get("local_score"))
+        if b_info and disp is not None
+        else None
+    )
+    pref_drop_at_k = (
+        float((a_info or {}).get("drop_at_k"))
+        if a_info and pref is not None and a_info.get("trace_id") == pref.trace_id
+        else float((b_info or {}).get("drop_at_k"))
+        if b_info and pref is not None
+        else None
+    )
+    disp_drop_at_k = (
+        float((a_info or {}).get("drop_at_k"))
+        if a_info and disp is not None and a_info.get("trace_id") == disp.trace_id
+        else float((b_info or {}).get("drop_at_k"))
+        if b_info and disp is not None
+        else None
+    )
     return {
         "id": prompt_id,
         "prompt": prompt,
@@ -431,24 +710,32 @@ def _make_decision_row(
         "disp_trace_id": disp.trace_id if disp is not None else None,
         "pref_final_correct": pref_correct,
         "disp_final_correct": disp_correct,
+        "correctness_bucket": _correctness_bucket(a_correct, b_correct),
         "correctness_pattern": pattern,
         "orientation_reason": orientation_reason,
-        "confidence": float(confidence) if confidence is not None else None,
+        "confidence": conf_value,
+        "confidence_bucket": confidence_bucket,
         "confidence_features": dict(features or {}),
         "utility_margin": float(abs((a_info or {}).get("utility", 0.0) - (b_info or {}).get("utility", 0.0))) if a_info and b_info else None,
         "local_score_gap": float(abs((a_info or {}).get("local_score", 0.0) - (b_info or {}).get("local_score", 0.0))) if a_info and b_info else None,
-        "pref_utility": float((a_info or {}).get("utility")) if a_info and pref is not None and a_info.get("trace_id") == pref.trace_id else float((b_info or {}).get("utility")) if b_info and pref is not None else None,
-        "disp_utility": float((a_info or {}).get("utility")) if a_info and disp is not None and a_info.get("trace_id") == disp.trace_id else float((b_info or {}).get("utility")) if b_info and disp is not None else None,
-        "pref_local_score": float((a_info or {}).get("local_score")) if a_info and pref is not None and a_info.get("trace_id") == pref.trace_id else float((b_info or {}).get("local_score")) if b_info and pref is not None else None,
-        "disp_local_score": float((a_info or {}).get("local_score")) if a_info and disp is not None and a_info.get("trace_id") == disp.trace_id else float((b_info or {}).get("local_score")) if b_info and disp is not None else None,
+        "pref_utility": pref_utility,
+        "disp_utility": disp_utility,
+        "pref_local_score": pref_local_score,
+        "disp_local_score": disp_local_score,
+        "support_gap": float((support or {}).get("support_gap", 0.0)) if support else None,
+        "drop_advantage": float(disp_drop_at_k - pref_drop_at_k) if pref_drop_at_k is not None and disp_drop_at_k is not None else None,
         "weak_divergence": weak_divergence,
         "degenerate_divergence": bool(divergence["too_short"] or divergence["exact_match"]) if divergence else False,
+        "formatting_only_divergence": bool(divergence["formatting_only"]) if divergence else False,
         "near_identical_divergence": bool(divergence["near_identical"]) if divergence else False,
-        "boundary_unstable": bool((divergence or {}).get("weak_divergence") or (divergence or {}).get("reconverges_after_boundary")) if divergence else False,
+        "trivial_difference_divergence": bool(divergence["trivial_difference"]) if divergence else False,
+        "boilerplate_only_divergence": bool(divergence["boilerplate_only"]) if divergence else False,
+        "boundary_unstable": bool((divergence or {}).get("reconverges_after_boundary")) if divergence else False,
         "divergent_similarity": float((divergence or {}).get("similarity", 0.0)) if divergence else None,
         "divergent_min_chars": int((divergence or {}).get("min_chars", 0)) if divergence else None,
         "reconverges_after_boundary": bool((divergence or {}).get("reconverges_after_boundary", False)) if divergence else False,
         "final_status": final_status,
+        "admissibility_reason_code": final_status,
     }
 
 
@@ -474,12 +761,14 @@ def _apply_method(
             if method_name == "confidence_filter_only" and confidence is not None and confidence < threshold:
                 dropped += 1
                 if decision_id in decision_index:
-                    decision_index[decision_id]["final_status"] = "dropped_confidence_threshold"
+                    decision_index[decision_id]["final_status"] = "dropped_low_confidence"
+                    decision_index[decision_id]["admissibility_reason_code"] = "dropped_low_confidence"
                 continue
             if method_name == "confidence_weighted_step_dpo" and confidence is not None and confidence < threshold:
                 dropped += 1
                 if decision_id in decision_index:
-                    decision_index[decision_id]["final_status"] = "dropped_confidence_threshold"
+                    decision_index[decision_id]["final_status"] = "dropped_low_confidence"
+                    decision_index[decision_id]["admissibility_reason_code"] = "dropped_low_confidence"
                 continue
             if method_name == "step_dpo":
                 row.weight = 1.0
@@ -493,7 +782,9 @@ def _apply_method(
         row.meta["pair_mode"] = pair_mode
         kept.append(row)
         if decision_id in decision_index:
-            decision_index[decision_id]["final_status"] = "kept"
+            keep_reason = str(row.meta.get("admissibility_reason_code", "kept_selected"))
+            decision_index[decision_id]["final_status"] = keep_reason
+            decision_index[decision_id]["admissibility_reason_code"] = keep_reason
             decision_index[decision_id]["training_weight"] = float(row.weight)
 
     kept.sort(
@@ -521,7 +812,7 @@ def _apply_method(
     utility_driven = sum(pair_purity_report["orientation_counts"].get(key, 0) for key in (
         "current_utility",
         "correctness_priority_same_correctness_utility",
-        "semi_purified_same_correctness_strong_local_preference",
+        "semi_purified_same_correctness_utility_screening",
     ))
     pair_purity_report["pair_purity_metrics"] = {
         "fraction_strictly_instructional_pairs": float(taxonomy["correct_vs_incorrect"] / kept_count) if kept else None,
@@ -529,14 +820,29 @@ def _apply_method(
         "fraction_misoriented_mixed_correctness_pairs": float(taxonomy["incorrect_vs_correct"] / kept_count) if kept else None,
         "fraction_dropped_by_purification": float(
             (
-                pair_purity_report["status_counts"].get("dropped_strict_purified_same_correctness", 0)
-                + pair_purity_report["status_counts"].get("dropped_strict_purified_weak_divergence", 0)
-                + pair_purity_report["status_counts"].get("dropped_semi_purified_same_correctness_not_stable", 0)
+                pair_purity_report["status_counts"].get("dropped_both_correct_ambiguous", 0)
+                + pair_purity_report["status_counts"].get("dropped_both_wrong_uninformative", 0)
+                + pair_purity_report["status_counts"].get("dropped_weak_divergence", 0)
+                + pair_purity_report["status_counts"].get("dropped_trivial_segment_difference", 0)
+                + pair_purity_report["status_counts"].get("dropped_near_identical", 0)
+                + pair_purity_report["status_counts"].get("dropped_formatting_only", 0)
+                + pair_purity_report["status_counts"].get("dropped_unstable_boundary", 0)
             )
             / max(1, len(decision_rows))
         ),
         "fraction_orientation_driven_by_correctness": float(correctness_driven / kept_count) if kept else None,
         "fraction_orientation_driven_only_by_utility": float(utility_driven / kept_count) if kept else None,
+    }
+    pair_purity_report["admissibility_diagnostics"] = {
+        "reason_code_counts": dict(sorted(pair_purity_report["status_counts"].items())),
+        "correctness_bucket_counts": _value_counts(decision_rows, "correctness_bucket"),
+        "kept_correctness_pattern_counts": _value_counts(
+            [row for row in decision_rows if _is_kept_status(row.get("final_status"))],
+            "correctness_pattern",
+        ),
+        "pair_mode_counts": _value_counts(decision_rows, "pair_mode"),
+        "confidence_bucket_counts": _value_counts(decision_rows, "confidence_bucket"),
+        "divergence_quality_counts": _divergence_quality_counts(decision_rows),
     }
 
     return PairBuildArtifacts(
@@ -563,23 +869,37 @@ def _build_local_pairs(cfg, traces: list[ScoredTraceRecord]) -> tuple[list[PairR
 
     for _, group in grouped.items():
         norm_scores = normalize_scores_across_prompt(group)
+        low_threshold = float(getattr(cfg.confidence, "low_threshold", 0.33))
+        high_threshold = float(getattr(cfg.confidence, "high_threshold", 0.66))
         prompt_pairs: list[PairRecord] = []
         prompt_decisions: list[dict[str, Any]] = []
         for a, b in combinations(group, 2):
             k = first_divergence(a.steps, b.steps)
             if k is None:
                 prompt_decisions.append(
-                    {
-                        "id": a.id,
-                        "prompt": a.prompt,
-                        "pair_mode": pair_mode,
-                        "k": None,
-                        "prefix_steps": [],
-                        "preferred_steps": [],
-                        "dispreferred_steps": [],
-                        "final_status": "dropped_no_divergence",
-                        "weak_divergence": False,
-                    }
+                    _make_decision_row(
+                        low_threshold=low_threshold,
+                        high_threshold=high_threshold,
+                        pair_mode=pair_mode,
+                        prompt_id=a.id,
+                        prompt=a.prompt,
+                        prefix_steps=[],
+                        preferred_steps=[],
+                        dispreferred_steps=[],
+                        trace_a=a,
+                        trace_b=b,
+                        pref=None,
+                        disp=None,
+                        k=None,
+                        orientation_reason=None,
+                        confidence=None,
+                        features=None,
+                        a_info=None,
+                        b_info=None,
+                        support=None,
+                        divergence=None,
+                        final_status="dropped_no_divergence",
+                    )
                 )
                 continue
 
@@ -589,17 +909,29 @@ def _build_local_pairs(cfg, traces: list[ScoredTraceRecord]) -> tuple[list[PairR
             b_seg = b.steps[k : min(len(b.steps), k + cfg.pair.window_H)]
             if not a_seg or not b_seg:
                 prompt_decisions.append(
-                    {
-                        "id": a.id,
-                        "prompt": a.prompt,
-                        "pair_mode": pair_mode,
-                        "k": k,
-                        "prefix_steps": a.steps[:k],
-                        "preferred_steps": a_seg,
-                        "dispreferred_steps": b_seg,
-                        "final_status": "dropped_empty_divergent_segment",
-                        "weak_divergence": False,
-                    }
+                    _make_decision_row(
+                        low_threshold=low_threshold,
+                        high_threshold=high_threshold,
+                        pair_mode=pair_mode,
+                        prompt_id=a.id,
+                        prompt=a.prompt,
+                        prefix_steps=a.steps[:k],
+                        preferred_steps=a_seg,
+                        dispreferred_steps=b_seg,
+                        trace_a=a,
+                        trace_b=b,
+                        pref=None,
+                        disp=None,
+                        k=k,
+                        orientation_reason=None,
+                        confidence=None,
+                        features=None,
+                        a_info=None,
+                        b_info=None,
+                        support=None,
+                        divergence=None,
+                        final_status="dropped_empty_divergent_segment",
+                    )
                 )
                 continue
 
@@ -621,6 +953,34 @@ def _build_local_pairs(cfg, traces: list[ScoredTraceRecord]) -> tuple[list[PairR
                 "drop_at_k": drop_at_k(b_scores, k),
                 "local_score": Rb,
             }
+            divergence_reason = _divergence_reason_code(pair_mode, divergence)
+            if divergence_reason is not None:
+                prompt_decisions.append(
+                    _make_decision_row(
+                        low_threshold=low_threshold,
+                        high_threshold=high_threshold,
+                        pair_mode=pair_mode,
+                        prompt_id=a.id,
+                        prompt=a.prompt,
+                        prefix_steps=a.steps[:k],
+                        preferred_steps=a_seg,
+                        dispreferred_steps=b_seg,
+                        trace_a=a,
+                        trace_b=b,
+                        pref=None,
+                        disp=None,
+                        k=k,
+                        orientation_reason=None,
+                        confidence=None,
+                        features=None,
+                        a_info=a_info,
+                        b_info=b_info,
+                        support=None,
+                        divergence=divergence,
+                        final_status=divergence_reason,
+                    )
+                )
+                continue
 
             pref, disp, pref_info, disp_info, decision_reason = _pair_mode_decision(
                 cfg=cfg,
@@ -636,12 +996,16 @@ def _build_local_pairs(cfg, traces: list[ScoredTraceRecord]) -> tuple[list[PairR
             if pref is None or disp is None or pref_info is None or disp_info is None:
                 prompt_decisions.append(
                     _make_decision_row(
+                        low_threshold=low_threshold,
+                        high_threshold=high_threshold,
                         pair_mode=pair_mode,
                         prompt_id=a.id,
                         prompt=a.prompt,
                         prefix_steps=a.steps[:k],
                         preferred_steps=a_seg,
                         dispreferred_steps=b_seg,
+                        trace_a=a,
+                        trace_b=b,
                         pref=None,
                         disp=None,
                         k=k,
@@ -650,6 +1014,7 @@ def _build_local_pairs(cfg, traces: list[ScoredTraceRecord]) -> tuple[list[PairR
                         features=None,
                         a_info=a_info,
                         b_info=b_info,
+                        support=None,
                         divergence=divergence,
                         final_status=decision_reason,
                     )
@@ -663,12 +1028,16 @@ def _build_local_pairs(cfg, traces: list[ScoredTraceRecord]) -> tuple[list[PairR
             if not preferred_steps or not dispreferred_steps:
                 prompt_decisions.append(
                     _make_decision_row(
+                        low_threshold=low_threshold,
+                        high_threshold=high_threshold,
                         pair_mode=pair_mode,
                         prompt_id=pref.id,
                         prompt=pref.prompt,
                         prefix_steps=pref.steps[:k],
                         preferred_steps=preferred_steps,
                         dispreferred_steps=dispreferred_steps,
+                        trace_a=a,
+                        trace_b=b,
                         pref=pref,
                         disp=disp,
                         k=k,
@@ -677,28 +1046,37 @@ def _build_local_pairs(cfg, traces: list[ScoredTraceRecord]) -> tuple[list[PairR
                         features=feats,
                         a_info=a_info,
                         b_info=b_info,
+                        support=support,
                         divergence=divergence,
                         final_status="dropped_empty_divergent_segment",
                     )
                 )
                 continue
 
+            keep_reason = "kept_mixed_correctness" if pref.final_correct != disp.final_correct else "kept_same_correctness_utility_oriented"
             if pair_mode == "semi_purified" and pref.final_correct == disp.final_correct:
-                utility_margin = abs(float(pref_info["utility"]) - float(disp_info["utility"]))
-                local_gap = abs(float(pref_info["local_score"]) - float(disp_info["local_score"]))
-                if (
-                    utility_margin < float(cfg.pair.semi_purified_min_utility_margin)
-                    or local_gap < float(cfg.pair.semi_purified_min_local_gap)
-                    or float(feats["confidence"]) < float(cfg.pair.semi_purified_min_confidence)
-                ):
+                keep_reason = _semi_purified_same_correctness_reason_code(
+                    cfg=cfg,
+                    pref=pref,
+                    disp=disp,
+                    pref_info=pref_info,
+                    disp_info=disp_info,
+                    support=support,
+                    feats=feats,
+                )
+                if not keep_reason.startswith("kept_"):
                     prompt_decisions.append(
                         _make_decision_row(
+                            low_threshold=low_threshold,
+                            high_threshold=high_threshold,
                             pair_mode=pair_mode,
                             prompt_id=pref.id,
                             prompt=pref.prompt,
                             prefix_steps=pref.steps[:k],
                             preferred_steps=preferred_steps,
                             dispreferred_steps=dispreferred_steps,
+                            trace_a=a,
+                            trace_b=b,
                             pref=pref,
                             disp=disp,
                             k=k,
@@ -707,8 +1085,9 @@ def _build_local_pairs(cfg, traces: list[ScoredTraceRecord]) -> tuple[list[PairR
                             features=feats,
                             a_info=a_info,
                             b_info=b_info,
+                            support=support,
                             divergence=divergence,
-                            final_status="dropped_semi_purified_same_correctness_not_stable",
+                            final_status=keep_reason,
                         )
                     )
                     continue
@@ -727,6 +1106,7 @@ def _build_local_pairs(cfg, traces: list[ScoredTraceRecord]) -> tuple[list[PairR
                     "decision_id": decision_id,
                     "pair_type": "local_step",
                     "pair_mode": pair_mode,
+                    "admissibility_reason_code": keep_reason,
                     "orientation_reason": decision_reason,
                     "pref_trace_id": pref.trace_id,
                     "disp_trace_id": disp.trace_id,
@@ -734,6 +1114,7 @@ def _build_local_pairs(cfg, traces: list[ScoredTraceRecord]) -> tuple[list[PairR
                     "disp_final_answer": disp.final_answer,
                     "pref_final_correct": pref.final_correct,
                     "disp_final_correct": disp.final_correct,
+                    "correctness_bucket": _correctness_bucket(bool(a.final_correct), bool(b.final_correct)),
                     "correctness_pattern": _correctness_pattern(bool(pref.final_correct), bool(disp.final_correct)),
                     "k": k,
                     "utility_margin": float(abs(float(pref_info["utility"]) - float(disp_info["utility"]))),
@@ -742,8 +1123,13 @@ def _build_local_pairs(cfg, traces: list[ScoredTraceRecord]) -> tuple[list[PairR
                     "pref_local_score": float(pref_info["local_score"]),
                     "disp_local_score": float(disp_info["local_score"]),
                     "local_score_gap": float(abs(float(pref_info["local_score"]) - float(disp_info["local_score"]))),
+                    "support_gap": float(support.get("support_gap", 0.0)),
+                    "drop_advantage": float(disp_info["drop_at_k"] - pref_info["drop_at_k"]),
                     "weak_divergence": bool(divergence["weak_divergence"]),
+                    "formatting_only_divergence": bool(divergence["formatting_only"]),
                     "near_identical_divergence": bool(divergence["near_identical"]),
+                    "trivial_difference_divergence": bool(divergence["trivial_difference"]),
+                    "boilerplate_only_divergence": bool(divergence["boilerplate_only"]),
                     "reconverges_after_boundary": bool(divergence["reconverges_after_boundary"]),
                     "divergent_similarity": float(divergence["similarity"]),
                     "divergent_min_chars": int(divergence["min_chars"]),
@@ -751,12 +1137,16 @@ def _build_local_pairs(cfg, traces: list[ScoredTraceRecord]) -> tuple[list[PairR
             )
             prompt_pairs.append(pair)
             decision_row = _make_decision_row(
+                low_threshold=low_threshold,
+                high_threshold=high_threshold,
                 pair_mode=pair_mode,
                 prompt_id=pref.id,
                 prompt=pref.prompt,
                 prefix_steps=pref.steps[:k],
                 preferred_steps=preferred_steps,
                 dispreferred_steps=dispreferred_steps,
+                trace_a=a,
+                trace_b=b,
                 pref=pref,
                 disp=disp,
                 k=k,
@@ -765,10 +1155,12 @@ def _build_local_pairs(cfg, traces: list[ScoredTraceRecord]) -> tuple[list[PairR
                 features=feats,
                 a_info=a_info,
                 b_info=b_info,
+                support=support,
                 divergence=divergence,
                 final_status="builder_candidate",
             )
             decision_row["decision_id"] = decision_id
+            decision_row["admissibility_reason_code"] = keep_reason
             prompt_decisions.append(decision_row)
 
         prompt_pairs.sort(key=lambda p: p.confidence or 0.0, reverse=True)
@@ -783,6 +1175,7 @@ def _build_local_pairs(cfg, traces: list[ScoredTraceRecord]) -> tuple[list[PairR
                 row["final_status"] = "builder_candidate"
             else:
                 row["final_status"] = "dropped_prompt_pair_cap"
+                row["admissibility_reason_code"] = "dropped_prompt_pair_cap"
         decisions.extend(prompt_decisions)
 
     pair_purity_report = _build_pair_purity_report(
@@ -835,6 +1228,7 @@ def _build_answer_pairs(cfg, traces: list[ScoredTraceRecord]) -> tuple[list[Pair
                         "decision_id": decision_id,
                         "pair_type": "answer_level",
                         "pair_mode": "answer_level",
+                        "admissibility_reason_code": "kept_answer_level_mixed_correctness",
                         "orientation_reason": "answer_level_final_correctness",
                         "pref_trace_id": pref.trace_id,
                         "disp_trace_id": disp.trace_id,
@@ -842,6 +1236,7 @@ def _build_answer_pairs(cfg, traces: list[ScoredTraceRecord]) -> tuple[list[Pair
                         "disp_final_answer": disp.final_answer,
                         "pref_final_correct": pref.final_correct,
                         "disp_final_correct": disp.final_correct,
+                        "correctness_bucket": "mixed_correctness",
                         "correctness_pattern": _correctness_pattern(True, False),
                     },
                 )
@@ -860,9 +1255,11 @@ def _build_answer_pairs(cfg, traces: list[ScoredTraceRecord]) -> tuple[list[Pair
                         "disp_trace_id": disp.trace_id,
                         "pref_final_correct": True,
                         "disp_final_correct": False,
+                        "correctness_bucket": "mixed_correctness",
                         "correctness_pattern": "correct_vs_incorrect",
                         "orientation_reason": "answer_level_final_correctness",
                         "confidence": None,
+                        "confidence_bucket": "unknown",
                         "confidence_features": {"answer_score_margin": float(margin)},
                         "utility_margin": None,
                         "local_score_gap": None,
@@ -877,6 +1274,7 @@ def _build_answer_pairs(cfg, traces: list[ScoredTraceRecord]) -> tuple[list[Pair
                         "divergent_similarity": None,
                         "divergent_min_chars": None,
                         "reconverges_after_boundary": False,
+                        "admissibility_reason_code": "kept_answer_level_mixed_correctness",
                         "final_status": "builder_candidate",
                     }
                 )
@@ -886,6 +1284,7 @@ def _build_answer_pairs(cfg, traces: list[ScoredTraceRecord]) -> tuple[list[Pair
                 continue
             if row.get("decision_id") not in kept_ids:
                 row["final_status"] = "dropped_prompt_pair_cap"
+                row["admissibility_reason_code"] = "dropped_prompt_pair_cap"
         all_pairs.extend(prompt_pairs[: cfg.pair.max_pairs_per_prompt])
 
     report = {

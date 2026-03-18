@@ -5,6 +5,7 @@ from cwspo.pipeline.build_pairs import build_pair_artifacts
 from cwspo.pipeline.diagnostics import (
     analyze_pairs,
     write_confidence_artifacts,
+    write_diagnosis_summary,
     write_pair_audits,
     write_pair_orientation_audit,
     write_pair_purity_report,
@@ -64,6 +65,19 @@ def main():
         path=cfg.paths.pair_orientation_audit_file,
         sample_count=cfg.diagnostics.num_orientation_audit_samples,
         seed=cfg.diagnostics.pair_audit_seed,
+    )
+    write_diagnosis_summary(
+        {
+            "method_name": artifacts.method_name,
+            "pair_mode": artifacts.pair_mode,
+            "lambda_ref": getattr(cfg.training, "lambda_ref", None),
+            "num_pairs": len(artifacts.pairs),
+            "num_raw_pairs": artifacts.num_raw_pairs,
+            "num_dropped_by_confidence": artifacts.num_dropped_by_confidence,
+            "mean_confidence": analysis.get("mean_confidence"),
+            "pair_purity_report": artifacts.pair_purity_report,
+        },
+        path=cfg.paths.diagnosis_summary_file or f"{cfg.paths.output_dir}/diagnosis_summary.md",
     )
     print(
         f"Wrote {len(artifacts.pairs)} pairs to {cfg.paths.pairs_file} "

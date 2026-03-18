@@ -328,3 +328,57 @@
   - research-relevant: yes, and the main signal is that purified local pairs were the missing ingredient;
   - confidence weighting remains plausible on the purified target, but it has not yet separated from simple hard filtering;
   - the strong verifier still did not improve downstream answer accuracy after purification.
+
+## 2026-03-18 - Post-repair full rerun execution phase
+
+- Status: completed the full requested post-repair matrix end-to-end; nothing stopped at pair-building or diagnostics.
+- Objective:
+  - rerun the actual train/eval path on the repaired pair logic,
+  - keep the same `100 / 24 / 48` slice and the same `1.5B` policy,
+  - use fresh output directories for clean comparison,
+  - and determine whether the repaired target improves downstream learning.
+- Configs used:
+  - `configs/rtx4090_48gb_postrepair_step_strict.yaml`
+  - `configs/rtx4090_48gb_postrepair_conf_filter_strict.yaml`
+  - `configs/rtx4090_48gb_postrepair_cw_strict.yaml`
+  - `configs/rtx4090_48gb_postrepair_cw_strict_lambda_ref.yaml`
+  - `configs/rtx4090_48gb_postrepair_step_semi.yaml`
+  - `configs/rtx4090_48gb_postrepair_cw_semi.yaml`
+- Artifact policy:
+  - reused `outputs/real_small/shared/train_traces.jsonl`
+  - reused `outputs/real_small/shared/scored_small_verifier.jsonl`
+  - rebuilt pairs and all downstream artifacts under `outputs/post_repair/*`
+  - each run wrote `pairs.jsonl`, `pair_purity_report.json`, `diagnosis_summary.md`, `training_report.json`, `final_eval.json`, `process_eval.json`, and `run_summary.json`
+- Commands:
+  - `source .venv/bin/activate && export HF_HOME=/workspace/CWSPO/cwspo_repo/.hf_home && python scripts/run_pipeline.py --config configs/rtx4090_48gb_postrepair_step_strict.yaml --with-train --with-final-eval --with-process-eval`
+  - `source .venv/bin/activate && export HF_HOME=/workspace/CWSPO/cwspo_repo/.hf_home && python scripts/run_pipeline.py --config configs/rtx4090_48gb_postrepair_conf_filter_strict.yaml --with-train --with-final-eval --with-process-eval`
+  - `source .venv/bin/activate && export HF_HOME=/workspace/CWSPO/cwspo_repo/.hf_home && python scripts/run_pipeline.py --config configs/rtx4090_48gb_postrepair_cw_strict.yaml --with-train --with-final-eval --with-process-eval`
+  - `source .venv/bin/activate && export HF_HOME=/workspace/CWSPO/cwspo_repo/.hf_home && python scripts/run_pipeline.py --config configs/rtx4090_48gb_postrepair_cw_strict_lambda_ref.yaml --with-train --with-final-eval --with-process-eval`
+  - `source .venv/bin/activate && export HF_HOME=/workspace/CWSPO/cwspo_repo/.hf_home && python scripts/run_pipeline.py --config configs/rtx4090_48gb_postrepair_step_semi.yaml --with-train --with-final-eval --with-process-eval`
+  - `source .venv/bin/activate && export HF_HOME=/workspace/CWSPO/cwspo_repo/.hf_home && python scripts/run_pipeline.py --config configs/rtx4090_48gb_postrepair_cw_semi.yaml --with-train --with-final-eval --with-process-eval`
+- Run metrics:
+  - `step_strict`: `148` pairs, `20` train steps, `0.5417` final accuracy, `0.2917` process exact, `0.2917` process coverage
+  - `conf_filter_strict`: `133` pairs, `18` train steps, `0.4583` final accuracy, `0.2500` process exact, `0.2500` process coverage
+  - `cw_strict`: `148` pairs, `20` train steps, `0.4583` final accuracy, `0.2917` process exact, `0.2917` process coverage
+  - `cw_strict_lambda_ref`: `148` pairs, `20` train steps, `0.4583` final accuracy, `0.2917` process exact, `0.2917` process coverage
+  - `step_semi`: `148` pairs, `20` train steps, `0.4583` final accuracy, `0.2917` process exact, `0.2917` process coverage
+  - `cw_semi`: `148` pairs, `20` train steps, `0.4167` final accuracy, `0.2917` process exact, `0.2917` process coverage
+- Pair-quality interpretation:
+  - repaired strict is now a `148`-pair pure mixed-correctness target with `0` kept `both_correct` and `0` kept `both_wrong` pairs;
+  - repaired semi still kept `0` same-correctness pairs on this slice, so it did not actually reopen the same-correctness frontier in practice;
+  - `conf_filter_strict` still removed exactly `15` low-confidence strict pairs, landing at `133` kept pairs.
+- Comparison to earlier refinement runs:
+  - `step_strict` improved from `0.4583` to `0.5417`;
+  - `conf_filter_strict` dropped from `0.5000` to `0.4583`;
+  - `cw_strict` dropped from `0.5000` to `0.4583`;
+  - `cw_strict_lambda_ref`, `step_semi`, and `cw_semi` had no earlier end-to-end result to compare against.
+- Additional diagnosis:
+  - I compared the saved pair JSONLs after projecting to training-relevant fields.
+  - `step_strict` and `step_semi` are identical at the actual training-example level.
+  - `cw_strict` and `cw_semi` are also identical at the actual weighted training-example level.
+  - That means the strict-vs-semi accuracy gap on this slice is best interpreted as run variance, not as evidence that semi recovered extra useful supervision.
+- Research interpretation:
+  - the repair improved the best plain purified Step-DPO path;
+  - the repair did not produce a post-repair confidence-weighted win;
+  - `lambda_ref=0.02` did not rescue the confidence-weighted strict run on this slice;
+  - the next honest move is repeated-seed or repeated-training evaluation on the repaired strict target, not more single-seed semi speculation.

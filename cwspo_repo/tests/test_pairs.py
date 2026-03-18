@@ -25,6 +25,15 @@ def _cfg(
             semi_purified_min_confidence=0.82,
             semi_purified_min_utility_margin=0.35,
             semi_purified_min_local_gap=0.35,
+            semi_purified_both_correct_min_confidence=0.76,
+            semi_purified_both_correct_min_utility_margin=0.25,
+            semi_purified_both_correct_min_local_gap=0.20,
+            semi_purified_both_correct_min_support_gap=0.05,
+            semi_purified_both_wrong_min_confidence=0.88,
+            semi_purified_both_wrong_min_utility_margin=0.45,
+            semi_purified_both_wrong_min_local_gap=0.35,
+            semi_purified_both_wrong_min_support_gap=0.10,
+            semi_purified_both_wrong_min_drop_advantage=0.15,
         ),
         confidence=SimpleNamespace(
             tau_margin=0.05,
@@ -225,7 +234,7 @@ def test_strict_purified_drops_same_correctness_pairs():
             prompt="Q",
             answer="10",
             trace_id=0,
-            steps=["Start.", "2+2=5"],
+            steps=["Start.", "Add the values and wrongly claim the total is five after combining them."],
             step_scores=[0.8, 0.2],
             reasoning="",
             final_answer="5",
@@ -236,7 +245,7 @@ def test_strict_purified_drops_same_correctness_pairs():
             prompt="Q",
             answer="10",
             trace_id=1,
-            steps=["Start.", "2+2=6"],
+            steps=["Start.", "Multiply unrelated quantities and wrongly conclude the total should be six instead."],
             step_scores=[0.7, 0.1],
             reasoning="",
             final_answer="6",
@@ -246,7 +255,7 @@ def test_strict_purified_drops_same_correctness_pairs():
 
     artifacts = build_pair_artifacts(_cfg(method_name="step_dpo", pair_mode="strict_purified"), traces)
     assert artifacts.pairs == []
-    assert artifacts.pair_purity_report["status_counts"]["dropped_strict_purified_same_correctness"] == 1
+    assert artifacts.pair_purity_report["status_counts"]["dropped_both_wrong_uninformative"] == 1
 
 
 def test_strict_purified_drops_weak_near_identical_mixed_correctness_pairs():
@@ -287,3 +296,34 @@ def test_pair_purity_report_tracks_orientation_and_taxonomy():
     assert "pair_taxonomy" in report
     assert "pair_purity_metrics" in report
     assert report["pair_taxonomy"]["correct_vs_incorrect"] + report["pair_taxonomy"]["incorrect_vs_correct"] == 1
+
+
+def test_semi_purified_rejects_both_wrong_pairs_without_delayed_error_evidence():
+    traces = [
+        ScoredTraceRecord(
+            id="ex6",
+            prompt="Q",
+            answer="10",
+            trace_id=0,
+            steps=["Start.", "Add the values and wrongly claim the total is five after combining them."],
+            step_scores=[0.9, 0.9],
+            reasoning="",
+            final_answer="5",
+            final_correct=False,
+        ),
+        ScoredTraceRecord(
+            id="ex6",
+            prompt="Q",
+            answer="10",
+            trace_id=1,
+            steps=["Start.", "Multiply unrelated quantities and wrongly conclude the total should be seven instead."],
+            step_scores=[0.1, 0.1],
+            reasoning="",
+            final_answer="7",
+            final_correct=False,
+        ),
+    ]
+
+    artifacts = build_pair_artifacts(_cfg(method_name="confidence_weighted_step_dpo", pair_mode="semi_purified"), traces)
+    assert artifacts.pairs == []
+    assert artifacts.pair_purity_report["status_counts"]["dropped_same_correctness_low_confidence"] == 1

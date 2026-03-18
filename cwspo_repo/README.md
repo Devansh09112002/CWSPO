@@ -16,6 +16,8 @@ The intended flow is:
 
 Detailed technical note:
 - `docs/TECHNICAL_PIPELINE.md`
+- `docs/REFINEMENT_TRIAL_REPORT.md`
+- `tasks/SERIOUS_DIAGNOSIS.md`
 
 ## Current runnable paths
 
@@ -42,6 +44,7 @@ The pair-purification / orientation refinement phase uses:
 - `configs/rtx4090_48gb_refine_cw_current.yaml`
 - `configs/rtx4090_48gb_refine_cw_correctness.yaml`
 - `configs/rtx4090_48gb_refine_cw_strict.yaml`
+- `configs/rtx4090_48gb_refine_cw_strict_lambda_ref.yaml`
 - `configs/rtx4090_48gb_refine_conf_filter_strict.yaml`
 - `configs/rtx4090_48gb_refine_cw_semi.yaml`
 - `configs/rtx4090_48gb_refine_cw_strict_strongverifier.yaml`
@@ -254,11 +257,17 @@ Low-priority semi-purified recovery attempt:
 python scripts/run_pipeline.py --config configs/rtx4090_48gb_refine_cw_semi.yaml --with-train --with-final-eval --with-process-eval --resume-from pairs
 ```
 
+Strict purified `lambda_ref` ablation:
+
+```bash
+python scripts/run_pipeline.py --config configs/rtx4090_48gb_refine_cw_strict_lambda_ref.yaml --with-train --with-final-eval --with-process-eval --resume-from pairs
+```
+
 Pair-mode definitions:
 - `current_utility`: prefer the branch with the larger mixed local utility.
 - `correctness_priority`: if final correctness differs, always prefer the finally correct branch; otherwise fall back to local utility.
-- `strict_purified`: keep only mixed-correctness pairs and drop both-correct, both-wrong, and weak-divergence local pairs.
-- `semi_purified`: keep mixed-correctness pairs always and admit same-correctness pairs only under conservative local criteria.
+- `strict_purified`: keep only mixed-correctness pairs and reject formatting-only, near-identical, trivial, and unstable divergences.
+- `semi_purified`: keep mixed-correctness pairs always; admit both-correct pairs only under strong local-preference evidence; admit both-wrong pairs only under delayed-error evidence; use confidence first as admissibility gating and then as training weight.
 
 Observed checked-in refinement results on the seed-42 slice:
 - `step_current = 0.4167`
@@ -375,6 +384,7 @@ Important files inside each run directory:
 - `confidence_report.md`: readable confidence summary
 - `pair_purity_report.json`: pair taxonomy, purity metrics, and boundary diagnostics
 - `pair_orientation_audit.md`: sampled kept and dropped pairs with orientation reasons
+- `diagnosis_summary.md`: per-run target-quality and method-diagnosis summary
 - `pair_audit_low.md`
 - `pair_audit_mid.md`
 - `pair_audit_high.md`
@@ -407,8 +417,9 @@ The pair audit markdown files show sampled pairs from low / medium / high confid
 - branch correctness metadata.
 
 The refinement phase adds:
-- `pair_purity_report.json`, which reports `correct_vs_incorrect`, `incorrect_vs_correct`, `both_correct`, `both_wrong`, weak-divergence counts, and orientation fractions;
-- `pair_orientation_audit.md`, which shows kept correctness-driven pairs, kept utility-driven pairs, and dropped pairs from weak-divergence and purification rules.
+- `pair_purity_report.json`, which now reports explicit reason-code histograms, correctness-bucket counts, confidence-bucket counts, and divergence-quality counts in addition to pair taxonomy;
+- `pair_orientation_audit.md`, which shows kept correctness-driven pairs, same-correctness recovery pairs, and dropped pairs split by divergence sanity, admissibility, and low-confidence rules;
+- `diagnosis_summary.md`, which records the pair set actually used, what was kept or dropped, and how to interpret the resulting run.
 
 Use these files to compare:
 - `current_utility` vs `correctness_priority` vs `strict_purified`

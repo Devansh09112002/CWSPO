@@ -108,3 +108,23 @@
 - Re-run `step_strict`, `conf_filter_strict`, and `cw_strict` across multiple seeds on the same `100 / 24 / 48` slice.
 - Report process exact on eligible examples separately from overall coverage.
 - Defer `semi_purified`, larger datasets, and any 7B-policy scaling until the purified-target comparison is stable.
+
+## Post-repair full rerun results
+
+This section supersedes the earlier refinement verdict for the repaired pair logic. All six reruns used fresh outputs under `outputs/post_repair/*`, the same `100 / 24 / 48` slice, the same `Qwen/Qwen2.5-Math-1.5B-Instruct` policy, the same small verifier traces/scored traces, and rebuilt pairs with the repaired admissibility logic.
+
+| Run | Pair Mode | Method | Verifier | Pair Count | Kept Pair Taxonomy | Train Steps | Final Accuracy | Process Metric | Directly Comparable To Old Result |
+| --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
+| `step_strict` | `strict_purified` | `step_dpo` | small | 148 | 148 `correct_vs_incorrect`; 0 `both_correct`; 0 `both_wrong` | 20 | 0.5417 | 0.2917 exact, 0.2917 coverage (`14/48` eligible; coverage-limited) | Yes: same slice as old `step_strict` |
+| `conf_filter_strict` | `strict_purified` | `confidence_filter_only` | small | 133 | 133 `correct_vs_incorrect`; 0 `both_correct`; 0 `both_wrong` | 18 | 0.4583 | 0.2500 exact, 0.2500 coverage (`12/48` eligible; coverage-limited) | Yes: same slice as old `conf_filter_strict` |
+| `cw_strict` | `strict_purified` | `confidence_weighted_step_dpo` | small | 148 | 148 `correct_vs_incorrect`; 0 `both_correct`; 0 `both_wrong` | 20 | 0.4583 | 0.2917 exact, 0.2917 coverage (`14/48` eligible; coverage-limited) | Yes: same slice as old `cw_strict` |
+| `cw_strict_lambda_ref` | `strict_purified` | `confidence_weighted_step_dpo` | small | 148 | 148 `correct_vs_incorrect`; 0 `both_correct`; 0 `both_wrong` | 20 | 0.4583 | 0.2917 exact, 0.2917 coverage (`14/48` eligible; coverage-limited) | No: new end-to-end `lambda_ref` variant |
+| `step_semi` | `semi_purified` | `step_dpo` | small | 148 | 148 `correct_vs_incorrect`; 0 `both_correct`; 0 `both_wrong` | 20 | 0.4583 | 0.2917 exact, 0.2917 coverage (`14/48` eligible; coverage-limited) | No: earlier `semi` work stopped at pair build |
+| `cw_semi` | `semi_purified` | `confidence_weighted_step_dpo` | small | 148 | 148 `correct_vs_incorrect`; 0 `both_correct`; 0 `both_wrong` | 20 | 0.4167 | 0.2917 exact, 0.2917 coverage (`14/48` eligible; coverage-limited) | No: earlier `semi` work stopped at pair build |
+
+- Repaired strict dropped five more training pairs than the earlier strict matrix: `153 -> 148` for `step_strict` and `cw_strict`, and `138 -> 133` for `conf_filter_strict`.
+- The best repaired run is now `step_strict` at `0.5417`, which beats both the answer-level DPO baseline (`0.5000`) and the earlier strict refinement result (`0.4583`).
+- Repaired confidence-aware strict training did not improve downstream learning on this slice: both `cw_strict` and `cw_strict_lambda_ref` finished at `0.4583`, and `conf_filter_strict` also fell to `0.4583`.
+- Repaired `semi_purified` did not recover any same-correctness supervision on this slice. Both semi reruns kept `0` `both_correct` pairs and `0` `both_wrong` pairs, so semi behaved like a different reason-coded route to the same mixed-correctness target.
+- I also compared the saved pair JSONLs on the training-relevant fields. `step_strict` and `step_semi` match exactly after stripping metadata, and `cw_strict` and `cw_semi` match exactly as weighted training pairs. The remaining accuracy differences therefore look like small-run optimization variance, not extra semi supervision.
+- Overall verdict: the repair helped downstream learning for plain purified Step-DPO, but it did not produce a confidence-weighted win. The repaired logic improved the current best local-pair path, not the original CW-SPO thesis.

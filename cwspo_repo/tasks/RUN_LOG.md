@@ -228,6 +228,47 @@ source .venv/bin/activate && export HF_HOME=$PWD/.hf_home && python scripts/run_
 source .venv/bin/activate && export HF_HOME=$PWD/.hf_home && python scripts/run_pipeline.py --config configs/rtx4090_48gb_real_small_strong_verifier.yaml --with-train --with-final-eval --with-process-eval
 ```
 
+## 2026-03-18 - Post-repair full rerun execution
+
+### What changed in this phase
+
+- Created fresh post-repair configs so the rerun matrix would not reuse the earlier refinement output directories:
+  - `configs/rtx4090_48gb_postrepair_step_strict.yaml`
+  - `configs/rtx4090_48gb_postrepair_conf_filter_strict.yaml`
+  - `configs/rtx4090_48gb_postrepair_cw_strict.yaml`
+  - `configs/rtx4090_48gb_postrepair_cw_strict_lambda_ref.yaml`
+  - `configs/rtx4090_48gb_postrepair_step_semi.yaml`
+  - `configs/rtx4090_48gb_postrepair_cw_semi.yaml`
+- Reused the shared seed-42 traces and small-verifier scored traces, but rebuilt pairs inside fresh `outputs/post_repair/*` directories under the repaired pair logic.
+- Completed the full requested train/final-eval/process-eval matrix with no technical block.
+- Saved verbose run logs under `outputs/post_repair/logs/*.log`.
+
+### Commands run
+
+- `source .venv/bin/activate && export HF_HOME=/workspace/CWSPO/cwspo_repo/.hf_home && python scripts/run_pipeline.py --config configs/rtx4090_48gb_postrepair_step_strict.yaml --with-train --with-final-eval --with-process-eval`
+- `source .venv/bin/activate && export HF_HOME=/workspace/CWSPO/cwspo_repo/.hf_home && python scripts/run_pipeline.py --config configs/rtx4090_48gb_postrepair_conf_filter_strict.yaml --with-train --with-final-eval --with-process-eval`
+- `source .venv/bin/activate && export HF_HOME=/workspace/CWSPO/cwspo_repo/.hf_home && python scripts/run_pipeline.py --config configs/rtx4090_48gb_postrepair_cw_strict.yaml --with-train --with-final-eval --with-process-eval`
+- `source .venv/bin/activate && export HF_HOME=/workspace/CWSPO/cwspo_repo/.hf_home && python scripts/run_pipeline.py --config configs/rtx4090_48gb_postrepair_cw_strict_lambda_ref.yaml --with-train --with-final-eval --with-process-eval`
+- `source .venv/bin/activate && export HF_HOME=/workspace/CWSPO/cwspo_repo/.hf_home && python scripts/run_pipeline.py --config configs/rtx4090_48gb_postrepair_step_semi.yaml --with-train --with-final-eval --with-process-eval`
+- `source .venv/bin/activate && export HF_HOME=/workspace/CWSPO/cwspo_repo/.hf_home && python scripts/run_pipeline.py --config configs/rtx4090_48gb_postrepair_cw_semi.yaml --with-train --with-final-eval --with-process-eval`
+- `source .venv/bin/activate && python - <<'PY' ... compare post-repair pair JSONLs on training-relevant fields ... PY`
+
+### Runs completed
+
+- `step_strict`: `148` pairs, `20` train steps, `0.5417` final accuracy, `0.2917` process exact, `0.2917` process coverage.
+- `conf_filter_strict`: `133` pairs, `18` train steps, `0.4583` final accuracy, `0.2500` process exact, `0.2500` process coverage.
+- `cw_strict`: `148` pairs, `20` train steps, `0.4583` final accuracy, `0.2917` process exact, `0.2917` process coverage.
+- `cw_strict_lambda_ref`: `148` pairs, `20` train steps, `0.4583` final accuracy, `0.2917` process exact, `0.2917` process coverage.
+- `step_semi`: `148` pairs, `20` train steps, `0.4583` final accuracy, `0.2917` process exact, `0.2917` process coverage.
+- `cw_semi`: `148` pairs, `20` train steps, `0.4167` final accuracy, `0.2917` process exact, `0.2917` process coverage.
+
+### Key notes
+
+- All six requested reruns completed end-to-end. There was no remaining technical blocker in the repaired pipeline.
+- The repaired strict target is smaller than the earlier strict target: `153 -> 148` kept pairs for `step_strict` and `cw_strict`, and `138 -> 133` for `conf_filter_strict`.
+- `semi_purified` admitted no same-correctness kept pairs on this slice. Its saved reason histograms are dominated by `dropped_same_correctness_low_confidence`, not by successful same-correctness recovery.
+- After projecting the pair JSONLs down to training-relevant fields, `step_strict` and `step_semi` match exactly, and `cw_strict` and `cw_semi` match exactly. The metric gap between strict and semi therefore reflects small-slice run variance rather than different supervision content.
+
 ## Phase: Pair purification and orientation refinement
 
 ### Current state entering this phase
@@ -355,3 +396,26 @@ source .venv/bin/activate && export HF_HOME=$PWD/.hf_home && python scripts/run_
 ```bash
 source .venv/bin/activate && export HF_HOME=$PWD/.hf_home && python scripts/run_pipeline.py --config configs/rtx4090_48gb_refine_cw_strict.yaml --with-train --with-final-eval --with-process-eval --resume-from pairs
 ```
+
+## Documentation update
+
+### What changed
+
+- Added `docs/REFINEMENT_TRIAL_REPORT.md`, a standalone report for the latest refinement phase.
+- Added a pointer to that report in `README.md`.
+
+### Why
+
+- The refinement logic, equations, configs, failure modes, and results were spread across multiple files.
+- This new document is meant to give one clear place to understand the latest trial end-to-end.
+
+### Files touched
+
+- `docs/REFINEMENT_TRIAL_REPORT.md`
+- `README.md`
+- `tasks/RUN_LOG.md`
+
+### Reproducibility impact
+
+- No code-path change.
+- Documentation only.

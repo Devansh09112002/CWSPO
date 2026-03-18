@@ -36,25 +36,25 @@ paths:
   prompt_file: data/real_small/gsm8k_train_100_seed42.jsonl
   eval_prompt_file: data/real_small/gsm8k_eval_24_seed43.jsonl
   process_ground_truth_file: data/real_small/process_eval_48_seed44.jsonl
-  output_dir: outputs/refinement/cw_semi
+  output_dir: outputs/refinement/cw_strict_lambda_ref
   traces_file: outputs/real_small/shared/train_traces.jsonl
   scored_file: outputs/real_small/shared/scored_small_verifier.jsonl
-  pairs_file: outputs/refinement/cw_semi/pairs.jsonl
-  train_metrics_file: outputs/refinement/cw_semi/train_metrics.json
-  training_report_file: outputs/refinement/cw_semi/training_report.json
-  training_report_md_file: outputs/refinement/cw_semi/training_report.md
-  final_eval_file: outputs/refinement/cw_semi/final_eval.json
-  process_eval_file: outputs/refinement/cw_semi/process_eval.json
-  confidence_analysis_file: outputs/refinement/cw_semi/confidence_analysis.json
-  confidence_report_file: outputs/refinement/cw_semi/confidence_report.md
-  pair_audit_low_file: outputs/refinement/cw_semi/pair_audit_low.md
-  pair_audit_mid_file: outputs/refinement/cw_semi/pair_audit_mid.md
-  pair_audit_high_file: outputs/refinement/cw_semi/pair_audit_high.md
-  pair_purity_report_file: outputs/refinement/cw_semi/pair_purity_report.json
-  pair_orientation_audit_file: outputs/refinement/cw_semi/pair_orientation_audit.md
-  process_failure_report_file: outputs/refinement/cw_semi/process_failures.md
-  run_summary_file: outputs/refinement/cw_semi/run_summary.json
-  checkpoint_dir: outputs/refinement/cw_semi/checkpoints
+  pairs_file: outputs/refinement/cw_strict_lambda_ref/pairs.jsonl
+  train_metrics_file: outputs/refinement/cw_strict_lambda_ref/train_metrics.json
+  training_report_file: outputs/refinement/cw_strict_lambda_ref/training_report.json
+  training_report_md_file: outputs/refinement/cw_strict_lambda_ref/training_report.md
+  final_eval_file: outputs/refinement/cw_strict_lambda_ref/final_eval.json
+  process_eval_file: outputs/refinement/cw_strict_lambda_ref/process_eval.json
+  confidence_analysis_file: outputs/refinement/cw_strict_lambda_ref/confidence_analysis.json
+  confidence_report_file: outputs/refinement/cw_strict_lambda_ref/confidence_report.md
+  pair_audit_low_file: outputs/refinement/cw_strict_lambda_ref/pair_audit_low.md
+  pair_audit_mid_file: outputs/refinement/cw_strict_lambda_ref/pair_audit_mid.md
+  pair_audit_high_file: outputs/refinement/cw_strict_lambda_ref/pair_audit_high.md
+  pair_purity_report_file: outputs/refinement/cw_strict_lambda_ref/pair_purity_report.json
+  pair_orientation_audit_file: outputs/refinement/cw_strict_lambda_ref/pair_orientation_audit.md
+  process_failure_report_file: outputs/refinement/cw_strict_lambda_ref/process_failures.md
+  run_summary_file: outputs/refinement/cw_strict_lambda_ref/run_summary.json
+  checkpoint_dir: outputs/refinement/cw_strict_lambda_ref/checkpoints
 
 policy:
   model_name: Qwen/Qwen2.5-Math-1.5B-Instruct
@@ -78,7 +78,7 @@ verifier:
   attn_implementation: flash_attention_2
 
 pair:
-  pair_mode: semi_purified
+  pair_mode: strict_purified
   window_H: 2
   alpha_local: 0.8
   tau_pair: 0.08
@@ -89,15 +89,6 @@ pair:
   semi_purified_min_confidence: 0.82
   semi_purified_min_utility_margin: 0.35
   semi_purified_min_local_gap: 0.35
-  semi_purified_both_correct_min_confidence: 0.76
-  semi_purified_both_correct_min_utility_margin: 0.25
-  semi_purified_both_correct_min_local_gap: 0.20
-  semi_purified_both_correct_min_support_gap: 0.05
-  semi_purified_both_wrong_min_confidence: 0.88
-  semi_purified_both_wrong_min_utility_margin: 0.45
-  semi_purified_both_wrong_min_local_gap: 0.35
-  semi_purified_both_wrong_min_support_gap: 0.10
-  semi_purified_both_wrong_min_drop_advantage: 0.15
 
 confidence:
   low_threshold: 0.33
@@ -112,7 +103,7 @@ training:
   num_epochs: 2
   lr: 2.0e-5
   beta: 0.1
-  lambda_ref: 0.0
+  lambda_ref: 0.02
   log_every: 5
   save_every: 100
   max_length: 2048

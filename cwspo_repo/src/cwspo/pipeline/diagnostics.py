@@ -224,6 +224,7 @@ def render_confidence_report(analysis: dict) -> str:
     purity_metrics = purity.get("pair_purity_metrics") or {}
     boundary = purity.get("boundary_diagnostics") or {}
     taxonomy = purity.get("pair_taxonomy") or {}
+    admissibility = purity.get("admissibility_diagnostics") or {}
     if purity:
         lines.extend(
             [
@@ -241,6 +242,18 @@ def render_confidence_report(analysis: dict) -> str:
                 f"- Incorrect-vs-correct kept: `{taxonomy.get('incorrect_vs_correct')}`",
                 f"- Both-correct kept: `{taxonomy.get('both_correct')}`",
                 f"- Both-wrong kept: `{taxonomy.get('both_wrong')}`",
+                "",
+            ]
+        )
+    if admissibility:
+        lines.extend(
+            [
+                "## Admissibility",
+                "",
+                f"- Reason codes: `{json.dumps(admissibility.get('reason_code_counts', {}), sort_keys=True)}`",
+                f"- Correctness buckets: `{json.dumps(admissibility.get('correctness_bucket_counts', {}), sort_keys=True)}`",
+                f"- Confidence buckets: `{json.dumps(admissibility.get('confidence_bucket_counts', {}), sort_keys=True)}`",
+                f"- Divergence quality: `{json.dumps(admissibility.get('divergence_quality_counts', {}), sort_keys=True)}`",
                 "",
             ]
         )
@@ -301,13 +314,22 @@ def _render_orientation_row(row: dict[str, Any]) -> str:
             f"## {row.get('id')}",
             "",
             f"- Final status: `{row.get('final_status')}`",
+            f"- Admissibility reason: `{row.get('admissibility_reason_code')}`",
             f"- Pair mode: `{row.get('pair_mode')}`",
             f"- Orientation reason: `{row.get('orientation_reason')}`",
+            f"- Correctness bucket: `{row.get('correctness_bucket')}`",
             f"- Correctness pattern: `{row.get('correctness_pattern')}`",
             f"- Confidence: `{row.get('confidence')}`",
+            f"- Confidence bucket: `{row.get('confidence_bucket')}`",
             f"- Utility margin: `{row.get('utility_margin')}`",
             f"- Local score gap: `{row.get('local_score_gap')}`",
+            f"- Support gap: `{row.get('support_gap')}`",
+            f"- Drop advantage: `{row.get('drop_advantage')}`",
             f"- Weak divergence: `{row.get('weak_divergence')}`",
+            f"- Formatting-only divergence: `{row.get('formatting_only_divergence')}`",
+            f"- Near-identical divergence: `{row.get('near_identical_divergence')}`",
+            f"- Trivial difference divergence: `{row.get('trivial_difference_divergence')}`",
+            f"- Boilerplate-only divergence: `{row.get('boilerplate_only_divergence')}`",
             f"- Divergent similarity: `{row.get('divergent_similarity')}`",
             f"- Final correctness pref/disp: `{row.get('pref_final_correct')}` / `{row.get('disp_final_correct')}`",
             f"- Features: `{json.dumps(row.get('confidence_features', {}), sort_keys=True)}`",
@@ -381,6 +403,55 @@ def write_pair_purity_report(report: dict, *, json_path: str | Path | None) -> N
     Path(json_path).write_text(json.dumps(report, indent=2, ensure_ascii=False) + "\n", encoding="utf-8")
 
 
+def render_diagnosis_summary(summary: dict[str, Any]) -> str:
+    purity = summary.get("pair_purity_report") or {}
+    purity_metrics = purity.get("pair_purity_metrics") or {}
+    taxonomy = purity.get("pair_taxonomy") or {}
+    admissibility = purity.get("admissibility_diagnostics") or {}
+    lines = [
+        "# Method Diagnosis Summary",
+        "",
+        f"- Method: `{summary.get('method_name')}`",
+        f"- Pair mode: `{summary.get('pair_mode')}`",
+        f"- Lambda ref: `{summary.get('lambda_ref')}`",
+        f"- Pairs kept: `{summary.get('num_pairs')}`",
+        f"- Raw candidates: `{summary.get('num_raw_pairs')}`",
+        f"- Dropped by confidence: `{summary.get('num_dropped_by_confidence')}`",
+        f"- Mean confidence: `{summary.get('mean_confidence')}`",
+        "",
+        "## Target Quality",
+        "",
+        f"- Instructional pair fraction: `{purity_metrics.get('fraction_strictly_instructional_pairs')}`",
+        f"- Ambiguous pair fraction: `{purity_metrics.get('fraction_ambiguous_pairs')}`",
+        f"- Same-correctness fraction: `{((taxonomy.get('both_correct', 0) + taxonomy.get('both_wrong', 0)) / max(1, summary.get('num_pairs') or 0)) if summary.get('num_pairs') else None}`",
+        f"- Both-correct fraction: `{(taxonomy.get('both_correct', 0) / max(1, summary.get('num_pairs') or 0)) if summary.get('num_pairs') else None}`",
+        f"- Both-wrong fraction: `{(taxonomy.get('both_wrong', 0) / max(1, summary.get('num_pairs') or 0)) if summary.get('num_pairs') else None}`",
+        f"- Orientation mismatch fraction: `{purity_metrics.get('fraction_misoriented_mixed_correctness_pairs')}`",
+        f"- Admissibility reasons: `{json.dumps(admissibility.get('reason_code_counts', {}), sort_keys=True)}`",
+        "",
+    ]
+    if summary.get("final_accuracy") is not None or summary.get("process_earliest_error_exact") is not None:
+        lines.extend(
+            [
+                "## Downstream",
+                "",
+                f"- Final answer accuracy: `{summary.get('final_accuracy')}`",
+                f"- Process exact: `{summary.get('process_earliest_error_exact')}`",
+                f"- Process coverage: `{summary.get('process_coverage')}`",
+                f"- Process metric scope: `{summary.get('process_evaluation_mode')}`",
+                "",
+            ]
+        )
+    return "\n".join(lines) + "\n"
+
+
+def write_diagnosis_summary(summary: dict[str, Any], *, path: str | Path | None) -> None:
+    if not path:
+        return
+    Path(path).parent.mkdir(parents=True, exist_ok=True)
+    Path(path).write_text(render_diagnosis_summary(summary), encoding="utf-8")
+
+
 def write_pair_orientation_audit(
     decision_rows: list[dict[str, Any]],
     *,
@@ -391,13 +462,17 @@ def write_pair_orientation_audit(
     if not path:
         return
 
+    def is_kept(row: dict[str, Any]) -> bool:
+        status = row.get("final_status") or ""
+        return isinstance(status, str) and status.startswith("kept")
+
     sections: list[tuple[str, list[dict[str, Any]]]] = [
         (
             "Kept: Correctness-Driven",
             [
                 row
                 for row in decision_rows
-                if row.get("final_status") == "kept"
+                if is_kept(row)
                 and row.get("orientation_reason")
                 in {
                     "correctness_priority_final_correctness",
@@ -412,34 +487,59 @@ def write_pair_orientation_audit(
             [
                 row
                 for row in decision_rows
-                if row.get("final_status") == "kept"
+                if is_kept(row)
                 and row.get("orientation_reason")
                 in {
                     "current_utility",
                     "correctness_priority_same_correctness_utility",
-                    "semi_purified_same_correctness_strong_local_preference",
+                    "semi_purified_same_correctness_utility_screening",
                 }
             ],
         ),
         (
-            "Dropped: Weak Divergence",
-            [row for row in decision_rows if "weak_divergence" in (row.get("final_status") or "")],
-        ),
-        (
-            "Dropped: Same-Correctness Purification",
+            "Kept: Same-Correctness Recovery",
             [
                 row
                 for row in decision_rows
                 if row.get("final_status")
                 in {
-                    "dropped_strict_purified_same_correctness",
-                    "dropped_semi_purified_same_correctness_not_stable",
+                    "kept_both_correct_strong_local_preference",
+                    "kept_both_wrong_delayed_error",
+                    "kept_same_correctness_utility_oriented",
+                }
+            ],
+        ),
+        (
+            "Dropped: Divergence Sanity",
+            [
+                row
+                for row in decision_rows
+                if row.get("final_status")
+                in {
+                    "dropped_weak_divergence",
+                    "dropped_trivial_segment_difference",
+                    "dropped_near_identical",
+                    "dropped_formatting_only",
+                    "dropped_unstable_boundary",
+                }
+            ],
+        ),
+        (
+            "Dropped: Same-Correctness Admissibility",
+            [
+                row
+                for row in decision_rows
+                if row.get("final_status")
+                in {
+                    "dropped_both_correct_ambiguous",
+                    "dropped_both_wrong_uninformative",
+                    "dropped_same_correctness_low_confidence",
                 }
             ],
         ),
         (
             "Dropped: Confidence Threshold",
-            [row for row in decision_rows if row.get("final_status") == "dropped_confidence_threshold"],
+            [row for row in decision_rows if row.get("final_status") == "dropped_low_confidence"],
         ),
     ]
 

@@ -11,6 +11,7 @@ from cwspo.pipeline.build_pairs import build_pair_artifacts
 from cwspo.pipeline.diagnostics import (
     analyze_pairs,
     write_confidence_artifacts,
+    write_diagnosis_summary,
     write_pair_audits,
     write_pair_orientation_audit,
     write_pair_purity_report,
@@ -209,7 +210,17 @@ def main():
     if cfg.paths.run_summary_file:
         pair_rows = read_jsonl(cfg.paths.pairs_file, PairRecord) if Path(cfg.paths.pairs_file).exists() else []
         confidence_summary = read_json(cfg.paths.confidence_analysis_file) if cfg.paths.confidence_analysis_file and Path(cfg.paths.confidence_analysis_file).exists() else {}
+        pair_purity = confidence_summary.get("pair_purity_report") or {}
+        pair_purity_metrics = pair_purity.get("pair_purity_metrics") or {}
+        pair_taxonomy = pair_purity.get("pair_taxonomy") or {}
+        admissibility = pair_purity.get("admissibility_diagnostics") or {}
+        same_correctness_fraction = None
+        if pair_rows:
+            same_correctness_fraction = float(
+                (pair_taxonomy.get("both_correct", 0) + pair_taxonomy.get("both_wrong", 0)) / max(1, len(pair_rows))
+            )
         process_confidence_summary = (process_summary or {}).get("process_confidence_analysis") or {}
+        diagnosis_summary_path = cfg.paths.diagnosis_summary_file or f"{cfg.paths.output_dir}/diagnosis_summary.md"
         run_summary = {
             "seed": cfg.seed,
             "method_name": cfg.method.name,
@@ -229,6 +240,8 @@ def main():
             "train_steps": train_summary.get("num_steps") if train_summary else None,
             "effective_batch_size": train_summary.get("effective_batch_size") if train_summary else None,
             "train_wall_clock_time_sec": train_summary.get("wall_clock_time_sec") if train_summary else None,
+            "lambda_ref": cfg.training.lambda_ref,
+            "training_beta": cfg.training.beta,
             "final_accuracy": final_summary.get("accuracy") if final_summary else None,
             "final_num_examples": final_summary.get("num_examples") if final_summary else None,
             "adapter_path": final_summary.get("adapter_path") if final_summary else None,
@@ -250,6 +263,15 @@ def main():
             "both_branches_incorrect_fraction": confidence_summary.get("both_branches_incorrect_fraction"),
             "both_branches_correct_fraction": confidence_summary.get("both_branches_correct_fraction"),
             "confidence_correctness_correlation": confidence_summary.get("confidence_correctness_correlation"),
+            "instructional_pair_fraction": pair_purity_metrics.get("fraction_strictly_instructional_pairs"),
+            "ambiguous_pair_fraction": pair_purity_metrics.get("fraction_ambiguous_pairs"),
+            "same_correctness_fraction": same_correctness_fraction,
+            "both_correct_fraction": (float(pair_taxonomy.get("both_correct", 0) / max(1, len(pair_rows))) if pair_rows else None),
+            "both_wrong_fraction": (float(pair_taxonomy.get("both_wrong", 0) / max(1, len(pair_rows))) if pair_rows else None),
+            "orientation_mismatch_fraction": pair_purity_metrics.get("fraction_misoriented_mixed_correctness_pairs"),
+            "admissibility_reason_histogram": admissibility.get("reason_code_counts"),
+            "correctness_bucket_histogram": admissibility.get("correctness_bucket_counts"),
+            "divergence_quality_histogram": admissibility.get("divergence_quality_counts"),
             "confidence_bucket_summary": confidence_summary.get("bucket_summary"),
             "pair_purity_report": confidence_summary.get("pair_purity_report"),
             "process_confidence_bucket_summary": process_confidence_summary.get("bucket_summary"),
@@ -260,12 +282,14 @@ def main():
                 "pairs_file": cfg.paths.pairs_file,
                 "pair_purity_report_file": cfg.paths.pair_purity_report_file,
                 "pair_orientation_audit_file": cfg.paths.pair_orientation_audit_file,
+                "diagnosis_summary_file": diagnosis_summary_path,
                 "checkpoint_dir": cfg.paths.checkpoint_dir,
                 "final_eval_file": cfg.paths.final_eval_file,
                 "process_eval_file": cfg.paths.process_eval_file,
             },
         }
         write_json(cfg.paths.run_summary_file, run_summary)
+        write_diagnosis_summary(run_summary, path=diagnosis_summary_path)
 
 
 if __name__ == '__main__':

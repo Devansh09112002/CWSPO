@@ -35,6 +35,7 @@ class PathsConfig(BaseModel):
     training_report_md_file: str | None = None
     process_failure_report_file: str | None = None
     run_summary_file: str | None = None
+    diagnosis_summary_file: str | None = None
 
 
 class PolicyConfig(BaseModel):
@@ -80,6 +81,15 @@ class PairConfig(BaseModel):
     semi_purified_min_confidence: float = 0.82
     semi_purified_min_utility_margin: float = 0.35
     semi_purified_min_local_gap: float = 0.35
+    semi_purified_both_correct_min_confidence: float = 0.76
+    semi_purified_both_correct_min_utility_margin: float = 0.25
+    semi_purified_both_correct_min_local_gap: float = 0.20
+    semi_purified_both_correct_min_support_gap: float = 0.05
+    semi_purified_both_wrong_min_confidence: float = 0.88
+    semi_purified_both_wrong_min_utility_margin: float = 0.45
+    semi_purified_both_wrong_min_local_gap: float = 0.35
+    semi_purified_both_wrong_min_support_gap: float = 0.10
+    semi_purified_both_wrong_min_drop_advantage: float = 0.15
 
 
 class ConfidenceConfig(BaseModel):
